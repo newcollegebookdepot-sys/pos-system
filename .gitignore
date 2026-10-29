@@ -1,7 +1,15 @@
 node_modules
 .next
 out
-data
 *.tsbuildinfo
 *.log
 .env*.local
+
+# Keep shared app DB in git; ignore runtime sidecars & secrets
+data/*
+!data/pos.sqlite
+data/*.bak*
+data/*.pre-import*
+data/session.secret
+data/*.sqlite-wal
+data/*.sqlite-shm
