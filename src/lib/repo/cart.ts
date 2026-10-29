@@ -8,28 +8,28 @@ import type { InvoiceLine } from "@/lib/types";
 /** Reserve stock for a cart line (immediate deduct). */
 export async function reserveLine(userId: number, clientKey: string, allocations: { batchId: number; qty: number }[]) {
   const db = await getDb();
-  return withTransaction(db, () => {
+  return await withTransaction(db, async () => {
     // Release any prior reservation for this client key
-    const prior = allRows<{ batch_id: number; qty: number }>(
+    const prior = await allRows<{ batch_id: number; qty: number }>(
       db,
       "SELECT batch_id, qty FROM cart_reservations WHERE user_id=? AND client_key=?",
       [userId, clientKey],
     );
     for (const p of prior) {
-      run(db, "UPDATE batches SET stock_pcs = stock_pcs + ? WHERE id = ?", [Number(p.qty), Number(p.batch_id)]);
+      await run(db, "UPDATE batches SET stock_pcs = stock_pcs + ? WHERE id = ?", [Number(p.qty), Number(p.batch_id)]);
     }
-    run(db, "DELETE FROM cart_reservations WHERE user_id=? AND client_key=?", [userId, clientKey]);
+    await run(db, "DELETE FROM cart_reservations WHERE user_id=? AND client_key=?", [userId, clientKey]);
 
     const done: { batchId: number; qty: number }[] = [];
     for (const a of allocations) {
-      const b = getRow<{ stock_pcs: number; name: string }>(db, "SELECT stock_pcs, name FROM batches WHERE id=?", [
+      const b = await getRow<{ stock_pcs: number; name: string }>(db, "SELECT stock_pcs, name FROM batches WHERE id=?", [
         a.batchId,
       ]);
       if (!b || Number(b.stock_pcs) < a.qty) {
         // rollback
         for (const d of done) {
-          run(db, "UPDATE batches SET stock_pcs = stock_pcs + ? WHERE id = ?", [d.qty, d.batchId]);
-          run(db, "DELETE FROM cart_reservations WHERE user_id=? AND client_key=? AND batch_id=?", [
+          await run(db, "UPDATE batches SET stock_pcs = stock_pcs + ? WHERE id = ?", [d.qty, d.batchId]);
+          await run(db, "DELETE FROM cart_reservations WHERE user_id=? AND client_key=? AND batch_id=?", [
             userId,
             clientKey,
             d.batchId,
@@ -37,8 +37,8 @@ export async function reserveLine(userId: number, clientKey: string, allocations
         }
         throw new ActionError(b ? `Only ${b.stock_pcs} left for ${b.name}.` : "Batch not found.");
       }
-      run(db, "UPDATE batches SET stock_pcs = stock_pcs - ?, updated_at=? WHERE id=?", [a.qty, nowIso(), a.batchId]);
-      run(db, "INSERT INTO cart_reservations (user_id, batch_id, qty, client_key, created_at) VALUES (?,?,?,?,?)", [
+      await run(db, "UPDATE batches SET stock_pcs = stock_pcs - ?, updated_at=? WHERE id=?", [a.qty, nowIso(), a.batchId]);
+      await run(db, "INSERT INTO cart_reservations (user_id, batch_id, qty, client_key, created_at) VALUES (?,?,?,?,?)", [
         userId,
         a.batchId,
         a.qty,
@@ -53,39 +53,39 @@ export async function reserveLine(userId: number, clientKey: string, allocations
 
 export async function releaseLine(userId: number, clientKey: string) {
   const db = await getDb();
-  withTransaction(db, () => {
-    const prior = allRows<{ batch_id: number; qty: number }>(
+  await withTransaction(db, async () => {
+    const prior = await allRows<{ batch_id: number; qty: number }>(
       db,
       "SELECT batch_id, qty FROM cart_reservations WHERE user_id=? AND client_key=?",
       [userId, clientKey],
     );
     for (const p of prior) {
-      run(db, "UPDATE batches SET stock_pcs = stock_pcs + ?, updated_at=? WHERE id = ?", [
+      await run(db, "UPDATE batches SET stock_pcs = stock_pcs + ?, updated_at=? WHERE id = ?", [
         Number(p.qty),
         nowIso(),
         Number(p.batch_id),
       ]);
     }
-    run(db, "DELETE FROM cart_reservations WHERE user_id=? AND client_key=?", [userId, clientKey]);
+    await run(db, "DELETE FROM cart_reservations WHERE user_id=? AND client_key=?", [userId, clientKey]);
   });
 }
 
 export async function releaseAllCart(userId: number) {
   const db = await getDb();
-  withTransaction(db, () => {
-    const prior = allRows<{ batch_id: number; qty: number }>(
+  await withTransaction(db, async () => {
+    const prior = await allRows<{ batch_id: number; qty: number }>(
       db,
       "SELECT batch_id, qty FROM cart_reservations WHERE user_id=?",
       [userId],
     );
     for (const p of prior) {
-      run(db, "UPDATE batches SET stock_pcs = stock_pcs + ?, updated_at=? WHERE id = ?", [
+      await run(db, "UPDATE batches SET stock_pcs = stock_pcs + ?, updated_at=? WHERE id = ?", [
         Number(p.qty),
         nowIso(),
         Number(p.batch_id),
       ]);
     }
-    run(db, "DELETE FROM cart_reservations WHERE user_id=?", [userId]);
+    await run(db, "DELETE FROM cart_reservations WHERE user_id=?", [userId]);
   });
 }
 
@@ -98,9 +98,9 @@ export async function saveDraft(input: {
   operatorName: string;
 }) {
   const db = await getDb();
-  const count = getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM sale_drafts");
+  const count = await getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM sale_drafts");
   const draftNumber = `DRF-${1000 + Number(count?.n || 0) + 1}`;
-  run(
+  await run(
     db,
     `INSERT INTO sale_drafts (draft_number, customer_id, customer_name, bill_discount_cents, paid_cents, cart_json, operator_name, created_at)
      VALUES (?,?,?,?,?,?,?,?)`,
@@ -120,7 +120,7 @@ export async function saveDraft(input: {
 
 export async function listDrafts() {
   const db = await getDb();
-  return allRows<{
+  return (await allRows<{
     id: number;
     draft_number: string;
     customer_name: string;
@@ -129,7 +129,7 @@ export async function listDrafts() {
     paid_cents: number;
     customer_id: number;
     created_at: string;
-  }>(db, "SELECT * FROM sale_drafts ORDER BY id DESC").map((d) => ({
+  }>(db, "SELECT * FROM sale_drafts ORDER BY id DESC")).map((d) => ({
     id: Number(d.id),
     draftNumber: d.draft_number,
     customerId: Number(d.customer_id),
@@ -143,7 +143,7 @@ export async function listDrafts() {
 
 export async function deleteDraft(id: number) {
   const db = await getDb();
-  run(db, "DELETE FROM sale_drafts WHERE id = ?", [id]);
+  await run(db, "DELETE FROM sale_drafts WHERE id = ?", [id]);
 }
 
 export async function getDraft(id: number) {
@@ -153,6 +153,6 @@ export async function getDraft(id: number) {
 
 export async function draftCount() {
   const db = await getDb();
-  const row = getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM sale_drafts");
+  const row = await getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM sale_drafts");
   return Number(row?.n || 0);
 }

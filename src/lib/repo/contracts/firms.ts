@@ -62,12 +62,12 @@ export async function listFirms(activeOnly = false) {
   const sql = activeOnly
     ? "SELECT * FROM ct_firms WHERE active = 1 ORDER BY name COLLATE NOCASE"
     : "SELECT * FROM ct_firms ORDER BY name COLLATE NOCASE";
-  return allRows<Row>(db, sql).map(map);
+  return (await allRows<Row>(db, sql)).map(map);
 }
 
 export async function getFirm(id: number) {
   const db = await getDb();
-  const row = getRow<Row>(db, "SELECT * FROM ct_firms WHERE id = ?", [id]);
+  const row = await getRow<Row>(db, "SELECT * FROM ct_firms WHERE id = ?", [id]);
   return row ? map(row) : null;
 }
 
@@ -108,7 +108,7 @@ export async function upsertFirm(input: {
     when,
   ];
   if (input.id) {
-    const updated = run(
+    const updated = await run(
       db,
       `UPDATE ct_firms SET name=?, legal_name=?, address=?, phone=?, email=?, gstin=?, vendor_number=?,
        bank_name=?, account_holder=?, account_number=?, branch_name=?, notes=?, active=?, updated_at=?
@@ -119,7 +119,7 @@ export async function upsertFirm(input: {
     return input.id;
   }
   try {
-    const inserted = run(
+    const inserted = await run(
       db,
       `INSERT INTO ct_firms (name, legal_name, address, phone, email, gstin, vendor_number,
         bank_name, account_holder, account_number, branch_name, notes, active, created_at, updated_at)
@@ -134,7 +134,7 @@ export async function upsertFirm(input: {
 
 export async function deleteFirm(id: number) {
   const db = await getDb();
-  const used = getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM ct_contracts WHERE firm_id = ?", [id]);
+  const used = await getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM ct_contracts WHERE firm_id = ?", [id]);
   if (Number(used?.n || 0) > 0) throw new ActionError("Firm has contracts — deactivate instead of delete.");
-  run(db, "DELETE FROM ct_firms WHERE id = ?", [id]);
+  await run(db, "DELETE FROM ct_firms WHERE id = ?", [id]);
 }

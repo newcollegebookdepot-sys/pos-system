@@ -107,14 +107,14 @@ export async function listBatches(opts: {
     params.push(opts.qtyMax);
   }
   const whereSql = where.join(" AND ");
-  const totalRow = getRow<{ n: number }>(db, `SELECT COUNT(*) AS n FROM batches WHERE ${whereSql}`, params);
+  const totalRow = await getRow<{ n: number }>(db, `SELECT COUNT(*) AS n FROM batches WHERE ${whereSql}`, params);
   const total = Number(totalRow?.n || 0);
 
   const pageSize = Math.min(200, Math.max(1, opts.pageSize ?? 50));
   const page = Math.max(1, opts.page ?? 1);
   const offset = (page - 1) * pageSize;
 
-  const rows = allRows<BatchRow>(
+  const rows = await allRows<BatchRow>(
     db,
     `SELECT * FROM batches WHERE ${whereSql} ORDER BY name COLLATE NOCASE, batch_no LIMIT ? OFFSET ?`,
     [...params, pageSize, offset],
@@ -122,7 +122,7 @@ export async function listBatches(opts: {
   const batches = rows.map(mapBatch);
 
   // Catalog value always reflects full active stock (not just this page/filter)
-  const valueRow = getRow<{ batches: number; pcs: number; cost: number; retail: number }>(
+  const valueRow = await getRow<{ batches: number; pcs: number; cost: number; retail: number }>(
     db,
     `SELECT COUNT(*) AS batches,
             COALESCE(SUM(stock_pcs), 0) AS pcs,
@@ -149,19 +149,19 @@ export async function listBatches(opts: {
 
 export async function getBatch(id: number) {
   const db = await getDb();
-  const row = getRow<BatchRow>(db, "SELECT * FROM batches WHERE id = ?", [id]);
+  const row = await getRow<BatchRow>(db, "SELECT * FROM batches WHERE id = ?", [id]);
   return row ? mapBatch(row) : null;
 }
 
 export async function getBatchByKey(batchKey: string) {
   const db = await getDb();
-  const row = getRow<BatchRow>(db, "SELECT * FROM batches WHERE batch_key = ?", [batchKey]);
+  const row = await getRow<BatchRow>(db, "SELECT * FROM batches WHERE batch_key = ?", [batchKey]);
   return row ? mapBatch(row) : null;
 }
 
 export async function batchesForName(name: string) {
   const db = await getDb();
-  const rows = allRows<BatchRow>(
+  const rows = await allRows<BatchRow>(
     db,
     "SELECT * FROM batches WHERE lower(name) = lower(?) AND active = 1 ORDER BY batch_no",
     [normName(name)],
@@ -179,11 +179,11 @@ export async function searchBatches(q: string, limit = 40) {
     .filter(Boolean);
   // Empty query: A–Z browse cap (first N by name)
   if (!tokens.length) {
-    return allRows<BatchRow>(
+    return (await allRows<BatchRow>(
       db,
       "SELECT * FROM batches WHERE active = 1 ORDER BY name COLLATE NOCASE, batch_no LIMIT ?",
       [cap],
-    ).map(mapBatch);
+    )).map(mapBatch);
   }
   const where: string[] = ["active = 1"];
   const params: (string | number)[] = [];
@@ -194,19 +194,19 @@ export async function searchBatches(q: string, limit = 40) {
     );
     params.push(like, like, like, like);
   }
-  return allRows<BatchRow>(
+  return (await allRows<BatchRow>(
     db,
     `SELECT * FROM batches WHERE ${where.join(" AND ")} ORDER BY name COLLATE NOCASE, batch_no LIMIT ?`,
     [...params, cap],
-  ).map(mapBatch);
+  )).map(mapBatch);
 }
 
 export async function listCategories() {
   const db = await getDb();
-  return allRows<{ category: string }>(
+  return (await allRows<{ category: string }>(
     db,
     "SELECT DISTINCT category FROM batches WHERE category != '' ORDER BY category COLLATE NOCASE",
-  ).map((r) => r.category);
+  )).map((r) => r.category);
 }
 
 export async function previewBatchNo(name: string, buyCents: number) {
@@ -241,12 +241,12 @@ export async function upsertBatch(input: {
       : null;
   const when = nowIso();
 
-  return withTransaction(db, () => {
-    const existingForName = allRows<BatchRow>(
+  return await withTransaction(db, async () => {
+    const existingForName = (await allRows<BatchRow>(
       db,
       "SELECT * FROM batches WHERE lower(name) = lower(?) ORDER BY batch_no",
       [name],
-    ).map(mapBatch);
+    )).map(mapBatch);
 
     if (input.batchNo != null && String(input.batchNo).trim() !== "") {
       const n = Number(input.batchNo);
@@ -258,7 +258,7 @@ export async function upsertBatch(input: {
             `${batchLabel(n)} for "${name}" already exists with buying price ${formatMoney(existing.buyCents)}. You cannot reuse it for ${formatMoney(buyCents)}.`,
           );
         }
-        run(
+        await run(
           db,
           `UPDATE batches SET stock_pcs = stock_pcs + ?, freight_cents = ?, landed_cents = ?, pack_size = ?, retail_cents = COALESCE(NULLIF(?,0), retail_cents),
            wholesale_cents = COALESCE(?, wholesale_cents), category = ?, packing_label = COALESCE(?, packing_label), updated_at = ?
@@ -279,7 +279,7 @@ export async function upsertBatch(input: {
         return { id: existing.id, created: false, message: `Restocked ${batchLabel(n)} for ${name}.` };
       }
       const key = makeBatchKey(name, n);
-      const inserted = run(
+      const inserted = await run(
         db,
         `INSERT INTO batches (name, batch_no, batch_key, category, pack_size, stock_pcs, buy_cents, freight_cents, landed_cents, wholesale_cents, retail_cents, packing_label, active, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
@@ -305,7 +305,7 @@ export async function upsertBatch(input: {
 
     const resolved = resolveBatchNo(existingForName, name, buyCents);
     if (resolved.same) {
-      run(
+      await run(
         db,
         `UPDATE batches SET stock_pcs = stock_pcs + ?, freight_cents = ?, landed_cents = ?, pack_size = ?, retail_cents = COALESCE(NULLIF(?,0), retail_cents),
          wholesale_cents = COALESCE(?, wholesale_cents), category = ?, packing_label = COALESCE(?, packing_label), updated_at = ?
@@ -332,7 +332,7 @@ export async function upsertBatch(input: {
 
     const n = resolved.batchNo;
     const key = makeBatchKey(name, n);
-    const inserted = run(
+    const inserted = await run(
       db,
       `INSERT INTO batches (name, batch_no, batch_key, category, pack_size, stock_pcs, buy_cents, freight_cents, landed_cents, wholesale_cents, retail_cents, packing_label, active, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
@@ -376,7 +376,7 @@ export async function updateBatch(input: {
   const buyCents = roundCents(input.buyCents);
   const freightCents = roundCents(input.freightCents);
   const key = makeBatchKey(name, batchNo);
-  const clash = getRow<{ id: number; buy_cents: number }>(
+  const clash = await getRow<{ id: number; buy_cents: number }>(
     db,
     "SELECT id, buy_cents FROM batches WHERE batch_key = ? AND id != ?",
     [key, input.id],
@@ -385,7 +385,7 @@ export async function updateBatch(input: {
     throw new ActionError(`Batch key ${key} already exists with a different buy cost.`);
   }
   // Also prevent same name+batch_no with different buy via name match
-  const sameNo = getRow<{ id: number; buy_cents: number }>(
+  const sameNo = await getRow<{ id: number; buy_cents: number }>(
     db,
     "SELECT id, buy_cents FROM batches WHERE lower(name)=lower(?) AND batch_no=? AND id!=?",
     [name, batchNo, input.id],
@@ -393,7 +393,7 @@ export async function updateBatch(input: {
   if (sameNo && roundCents(sameNo.buy_cents) !== buyCents) {
     throw new ActionError(`${batchLabel(batchNo)} for "${name}" already exists with another buy cost.`);
   }
-  const updated = run(
+  const updated = await run(
     db,
     `UPDATE batches SET name=?, batch_no=?, batch_key=?, category=?, pack_size=?, stock_pcs=?, buy_cents=?, freight_cents=?, landed_cents=?,
      wholesale_cents=?, retail_cents=?, packing_label=?, updated_at=? WHERE id=?`,
@@ -419,46 +419,46 @@ export async function updateBatch(input: {
 
 export async function adjustBatchStock(id: number, deltaPcs: number) {
   const db = await getDb();
-  withTransaction(db, () => {
-    const row = getRow<BatchRow>(db, "SELECT * FROM batches WHERE id = ?", [id]);
+  await withTransaction(db, async () => {
+    const row = await getRow<BatchRow>(db, "SELECT * FROM batches WHERE id = ?", [id]);
     if (!row) throw new ActionError("Batch not found.");
     const next = Number(row.stock_pcs) + Math.round(deltaPcs);
     if (next < 0) throw new ActionError(`That would take ${row.name} below zero.`);
-    run(db, "UPDATE batches SET stock_pcs = ?, updated_at = ? WHERE id = ?", [next, nowIso(), id]);
+    await run(db, "UPDATE batches SET stock_pcs = ?, updated_at = ? WHERE id = ?", [next, nowIso(), id]);
   });
 }
 
 export async function deleteBatch(id: number) {
   const db = await getDb();
-  const used = getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM invoice_allocations WHERE batch_id = ?", [id]);
+  const used = await getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM invoice_allocations WHERE batch_id = ?", [id]);
   if (Number(used?.n) > 0) {
-    run(db, "UPDATE batches SET active = 0, stock_pcs = 0, updated_at = ? WHERE id = ?", [nowIso(), id]);
+    await run(db, "UPDATE batches SET active = 0, stock_pcs = 0, updated_at = ? WHERE id = ?", [nowIso(), id]);
     return { soft: true };
   }
-  run(db, "DELETE FROM batches WHERE id = ?", [id]);
+  await run(db, "DELETE FROM batches WHERE id = ?", [id]);
   return { soft: false };
 }
 
 export async function wipeAllBatches() {
   const db = await getDb();
-  withTransaction(db, () => {
-    run(db, "DELETE FROM invoice_allocations");
-    run(db, "DELETE FROM invoice_lines");
-    run(db, "DELETE FROM invoices");
-    run(db, "DELETE FROM cart_reservations");
-    run(db, "DELETE FROM sale_drafts");
-    run(db, "DELETE FROM purchase_lines");
-    run(db, "DELETE FROM batches");
+  await withTransaction(db, async () => {
+    await run(db, "DELETE FROM invoice_allocations");
+    await run(db, "DELETE FROM invoice_lines");
+    await run(db, "DELETE FROM invoices");
+    await run(db, "DELETE FROM cart_reservations");
+    await run(db, "DELETE FROM sale_drafts");
+    await run(db, "DELETE FROM purchase_lines");
+    await run(db, "DELETE FROM batches");
   });
 }
 
 export async function lowStockBatches(threshold = 10) {
   const db = await getDb();
-  return allRows<BatchRow>(
+  return (await allRows<BatchRow>(
     db,
     "SELECT * FROM batches WHERE active = 1 AND stock_pcs < ? ORDER BY stock_pcs, name COLLATE NOCASE LIMIT 50",
     [threshold],
-  ).map(mapBatch);
+  )).map(mapBatch);
 }
 
 export function searchTokensMatch(haystack: string, query: string) {

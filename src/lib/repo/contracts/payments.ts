@@ -36,11 +36,11 @@ function map(row: Row): CtPayment {
 
 export async function listPayments(contractId: number) {
   const db = await getDb();
-  return allRows<Row>(
+  return (await allRows<Row>(
     db,
     "SELECT * FROM ct_payments WHERE contract_id = ? ORDER BY iso_date DESC, id DESC",
     [contractId],
-  ).map(map);
+  )).map(map);
 }
 
 export async function addPayment(input: {
@@ -53,7 +53,7 @@ export async function addPayment(input: {
   if (amount <= 0) throw new ActionError("Payment amount must be positive.");
   const db = await getDb();
   const when = nowIso();
-  const inserted = run(
+  const inserted = await run(
     db,
     `INSERT INTO ct_payments (contract_id, amount_cents, iso_date, notes, created_at) VALUES (?,?,?,?,?)`,
     [input.contractId, amount, input.isoDate.slice(0, 10), input.notes?.trim() || null, when],
@@ -63,5 +63,5 @@ export async function addPayment(input: {
 
 export async function deletePayment(id: number) {
   const db = await getDb();
-  run(db, "DELETE FROM ct_payments WHERE id = ?", [id]);
+  await run(db, "DELETE FROM ct_payments WHERE id = ?", [id]);
 }

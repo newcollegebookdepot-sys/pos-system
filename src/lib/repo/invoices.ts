@@ -61,8 +61,8 @@ function mapInv(row: InvRow, lines: InvoiceLine[]): Invoice {
   };
 }
 
-function loadLines(db: Awaited<ReturnType<typeof getDb>>, invoiceId: number): InvoiceLine[] {
-  const lines = allRows<{
+async function loadLines(db: Awaited<ReturnType<typeof getDb>>, invoiceId: number): Promise<InvoiceLine[]> {
+  const lines = await allRows<{
     id: number;
     name: string;
     sale_unit: SaleUnit;
@@ -76,21 +76,17 @@ function loadLines(db: Awaited<ReturnType<typeof getDb>>, invoiceId: number): In
     saved_cents: number;
     line_total_cents: number;
   }>(db, "SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY id", [invoiceId]);
-  return lines.map((l) => {
-    const allocations = allRows<{
+  const out: InvoiceLine[] = [];
+  for (const l of lines) {
+    const allocationRows = await allRows<{
       batch_id: number;
       batch_no: number;
       qty: number;
       landed_cents: number;
     }>(db, "SELECT batch_id, batch_no, qty, landed_cents FROM invoice_allocations WHERE invoice_line_id = ?", [
       l.id,
-    ]).map((a) => ({
-      batchId: Number(a.batch_id),
-      batchNo: Number(a.batch_no),
-      qty: Number(a.qty),
-      landedCents: Number(a.landed_cents),
-    }));
-    return {
+    ]);
+    out.push({
       id: Number(l.id),
       name: l.name,
       saleUnit: l.sale_unit,
@@ -103,23 +99,29 @@ function loadLines(db: Awaited<ReturnType<typeof getDb>>, invoiceId: number): In
       retailTotalCents: Number(l.retail_total_cents),
       savedCents: Number(l.saved_cents),
       lineTotalCents: Number(l.line_total_cents),
-      allocations,
-    };
-  });
+      allocations: allocationRows.map((a) => ({
+        batchId: Number(a.batch_id),
+        batchNo: Number(a.batch_no),
+        qty: Number(a.qty),
+        landedCents: Number(a.landed_cents),
+      })),
+    });
+  }
+  return out;
 }
 
 export async function getInvoice(id: number) {
   const db = await getDb();
-  const row = getRow<InvRow>(db, "SELECT * FROM invoices WHERE id = ?", [id]);
+  const row = await getRow<InvRow>(db, "SELECT * FROM invoices WHERE id = ?", [id]);
   if (!row) return null;
-  return mapInv(row, loadLines(db, id));
+  return mapInv(row, await loadLines(db, id));
 }
 
 export async function getInvoiceByNumber(invoiceNumber: string) {
   const db = await getDb();
-  const row = getRow<InvRow>(db, "SELECT * FROM invoices WHERE invoice_number = ?", [invoiceNumber]);
+  const row = await getRow<InvRow>(db, "SELECT * FROM invoices WHERE invoice_number = ?", [invoiceNumber]);
   if (!row) return null;
-  return mapInv(row, loadLines(db, Number(row.id)));
+  return mapInv(row, await loadLines(db, Number(row.id)));
 }
 
 export async function listInvoices(opts: {
@@ -132,7 +134,7 @@ export async function listInvoices(opts: {
   maxTotal?: number | null;
 }) {
   const db = await getDb();
-  let rows = allRows<InvRow>(db, "SELECT * FROM invoices ORDER BY iso_date DESC, id DESC").map((r) =>
+  let rows = (await allRows<InvRow>(db, "SELECT * FROM invoices ORDER BY iso_date DESC, id DESC")).map((r) =>
     mapInv(r, []),
   );
   rows = rows.filter((inv) => inRange(inv.isoDate, opts.from, opts.to));
@@ -157,12 +159,12 @@ export async function listInvoices(opts: {
   return { invoices: rows, summary };
 }
 
-function nextInvoiceNumber(db: Awaited<ReturnType<typeof getDb>>) {
-  const count = getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM invoices");
+async function nextInvoiceNumber(db: Awaited<ReturnType<typeof getDb>>) {
+  const count = await getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM invoices");
   return `INV-${1000 + Number(count?.n || 0) + 1}`;
 }
 
-function insertInvoiceRecord(
+async function insertInvoiceRecord(
   db: Awaited<ReturnType<typeof getDb>>,
   input: {
     customer: { id: number; name: string; phone: string; type: string; balanceCents: number };
@@ -192,8 +194,8 @@ function insertInvoiceRecord(
   const status = invoiceStatus(input.paidCents, ledger.unpaid);
   const when = nowIso();
   const isoDate = input.isoDate || when.slice(0, 10);
-  const invoiceNumber = nextInvoiceNumber(db);
-  const inv = run(
+  const invoiceNumber = await nextInvoiceNumber(db);
+  const inv = await run(
     db,
     `INSERT INTO invoices (
       invoice_number, iso_date, customer_id, customer_name, customer_phone, customer_type, operator_name,
@@ -226,7 +228,7 @@ function insertInvoiceRecord(
     ],
   );
   for (const line of input.lines) {
-    const lineIns = run(
+    const lineIns = await run(
       db,
       `INSERT INTO invoice_lines (
         invoice_id, name, sale_unit, pack_size, qty_pcs, packets, retail_cents, disc_cents, disc_pct,
@@ -248,14 +250,14 @@ function insertInvoiceRecord(
       ],
     );
     for (const a of line.allocations) {
-      run(
+      await run(
         db,
         `INSERT INTO invoice_allocations (invoice_line_id, batch_id, batch_no, qty, landed_cents) VALUES (?,?,?,?,?)`,
         [lineIns.id, a.batchId, a.batchNo, a.qty, a.landedCents],
       );
     }
   }
-  run(db, "UPDATE customers SET balance_cents=?, updated_at=? WHERE id=?", [
+  await run(db, "UPDATE customers SET balance_cents=?, updated_at=? WHERE id=?", [
     ledger.closingBalance,
     when,
     input.customer.id,
@@ -274,8 +276,8 @@ export async function finalizeSale(input: {
 }) {
   if (!input.lines.length) throw new ActionError("Cart empty. Add items first.");
   const db = await getDb();
-  return withTransaction(db, () => {
-    const cust = getRow<{
+  return await withTransaction(db, async () => {
+    const cust = await getRow<{
       id: number;
       name: string;
       phone: string;
@@ -286,7 +288,7 @@ export async function finalizeSale(input: {
 
     for (const line of input.lines) {
       for (const a of line.allocations) {
-        const b = getRow<{ id: number; stock_pcs: number }>(db, "SELECT id, stock_pcs FROM batches WHERE id = ?", [
+        const b = await getRow<{ id: number; stock_pcs: number }>(db, "SELECT id, stock_pcs FROM batches WHERE id = ?", [
           a.batchId,
         ]);
         if (!b) throw new ActionError(`Batch missing for ${line.name}.`);
@@ -294,7 +296,7 @@ export async function finalizeSale(input: {
       }
     }
 
-    const result = insertInvoiceRecord(db, {
+    const result = await insertInvoiceRecord(db, {
       customer: {
         id: Number(cust.id),
         name: cust.name,
@@ -309,17 +311,17 @@ export async function finalizeSale(input: {
     });
 
     // Clear cart reservations (stock already deducted at reserve time)
-    run(db, "DELETE FROM cart_reservations WHERE user_id = ?", [input.userId]);
+    await run(db, "DELETE FROM cart_reservations WHERE user_id = ?", [input.userId]);
     return result;
   });
 }
 
 export async function restoreStockFromInvoice(db: Awaited<ReturnType<typeof getDb>>, invoiceId: number) {
-  const lines = loadLines(db, invoiceId);
+  const lines = await loadLines(db, invoiceId);
   const when = nowIso();
   for (const line of lines) {
     for (const a of line.allocations) {
-      run(db, "UPDATE batches SET stock_pcs = stock_pcs + ?, updated_at = ? WHERE id = ?", [
+      await run(db, "UPDATE batches SET stock_pcs = stock_pcs + ?, updated_at = ? WHERE id = ?", [
         a.qty,
         when,
         a.batchId,
@@ -330,7 +332,7 @@ export async function restoreStockFromInvoice(db: Awaited<ReturnType<typeof getD
 
 export async function reverseInvoiceLedger(db: Awaited<ReturnType<typeof getDb>>, inv: Invoice) {
   // Reverse: closing was prev + grand - paid; restore to prev
-  const cust = getRow<{ balance_cents: number }>(db, "SELECT balance_cents FROM customers WHERE id = ?", [
+  const cust = await getRow<{ balance_cents: number }>(db, "SELECT balance_cents FROM customers WHERE id = ?", [
     inv.customerId,
   ]);
   if (!cust) return;
@@ -339,33 +341,33 @@ export async function reverseInvoiceLedger(db: Awaited<ReturnType<typeof getDb>>
   const delta = roundCents(inv.grandTotalCents - inv.paidCents);
   let next = Number(cust.balance_cents) - delta;
   if (inv.customerId === WALK_IN_ID) next = Math.max(0, next);
-  run(db, "UPDATE customers SET balance_cents=?, updated_at=? WHERE id=?", [next, nowIso(), inv.customerId]);
+  await run(db, "UPDATE customers SET balance_cents=?, updated_at=? WHERE id=?", [next, nowIso(), inv.customerId]);
 }
 
 export async function deleteInvoice(id: number) {
   const db = await getDb();
-  return withTransaction(db, () => {
-    const inv = getRow<InvRow>(db, "SELECT * FROM invoices WHERE id = ?", [id]);
+  return await withTransaction(db, async () => {
+    const inv = await getRow<InvRow>(db, "SELECT * FROM invoices WHERE id = ?", [id]);
     if (!inv) throw new ActionError("Invoice not found.");
-    const full = mapInv(inv, loadLines(db, id));
-    reverseInvoiceLedger(db, full);
-    restoreStockFromInvoice(db, id);
-    run(db, "DELETE FROM invoice_allocations WHERE invoice_line_id IN (SELECT id FROM invoice_lines WHERE invoice_id=?)", [
+    const full = mapInv(inv, await loadLines(db, id));
+    await reverseInvoiceLedger(db, full);
+    await restoreStockFromInvoice(db, id);
+    await run(db, "DELETE FROM invoice_allocations WHERE invoice_line_id IN (SELECT id FROM invoice_lines WHERE invoice_id=?)", [
       id,
     ]);
-    run(db, "DELETE FROM invoice_lines WHERE invoice_id = ?", [id]);
-    run(db, "DELETE FROM invoices WHERE id = ?", [id]);
+    await run(db, "DELETE FROM invoice_lines WHERE invoice_id = ?", [id]);
+    await run(db, "DELETE FROM invoices WHERE id = ?", [id]);
     return full;
   });
 }
 
 export async function reassignInvoiceCustomer(invoiceId: number, newCustomerId: number) {
   const db = await getDb();
-  return withTransaction(db, () => {
-    const invRow = getRow<InvRow>(db, "SELECT * FROM invoices WHERE id = ?", [invoiceId]);
+  return await withTransaction(db, async () => {
+    const invRow = await getRow<InvRow>(db, "SELECT * FROM invoices WHERE id = ?", [invoiceId]);
     if (!invRow) throw new ActionError("Invoice not found.");
-    const inv = mapInv(invRow, loadLines(db, invoiceId));
-    const neu = getRow<{
+    const inv = mapInv(invRow, await loadLines(db, invoiceId));
+    const neu = await getRow<{
       id: number;
       name: string;
       phone: string;
@@ -375,7 +377,7 @@ export async function reassignInvoiceCustomer(invoiceId: number, newCustomerId: 
     if (!neu) throw new ActionError("Customer not found.");
     if (neu.id === inv.customerId) return;
 
-    reverseInvoiceLedger(db, inv);
+    await reverseInvoiceLedger(db, inv);
 
     const ledger = saleLedgerMath(
       { id: Number(neu.id), balanceCents: Number(neu.balance_cents) },
@@ -383,7 +385,7 @@ export async function reassignInvoiceCustomer(invoiceId: number, newCustomerId: 
       inv.paidCents,
     );
     const status = invoiceStatus(inv.paidCents, ledger.unpaid);
-    run(
+    await run(
       db,
       `UPDATE invoices SET customer_id=?, customer_name=?, customer_phone=?, customer_type=?,
        unpaid_cents=?, surplus_applied_cents=?, prev_balance_cents=?, closing_balance_cents=?, status=?, updated_at=?
@@ -402,7 +404,7 @@ export async function reassignInvoiceCustomer(invoiceId: number, newCustomerId: 
         invoiceId,
       ],
     );
-    run(db, "UPDATE customers SET balance_cents=?, updated_at=? WHERE id=?", [
+    await run(db, "UPDATE customers SET balance_cents=?, updated_at=? WHERE id=?", [
       ledger.closingBalance,
       nowIso(),
       neu.id,
@@ -417,25 +419,25 @@ export async function saveInvoiceEdit(input: {
   paidCents: number;
 }) {
   const db = await getDb();
-  return withTransaction(db, () => {
-    const invRow = getRow<InvRow>(db, "SELECT * FROM invoices WHERE id = ?", [input.id]);
+  return await withTransaction(db, async () => {
+    const invRow = await getRow<InvRow>(db, "SELECT * FROM invoices WHERE id = ?", [input.id]);
     if (!invRow) throw new ActionError("Invoice not found.");
-    const old = mapInv(invRow, loadLines(db, input.id));
+    const old = mapInv(invRow, await loadLines(db, input.id));
 
     // Restore old stock, reverse old ledger
-    reverseInvoiceLedger(db, old);
-    restoreStockFromInvoice(db, input.id);
+    await reverseInvoiceLedger(db, old);
+    await restoreStockFromInvoice(db, input.id);
 
     // Apply new stock deductions
     for (const line of input.lines) {
       for (const a of line.allocations) {
-        const b = getRow<{ stock_pcs: number; name: string }>(db, "SELECT stock_pcs, name FROM batches WHERE id=?", [
+        const b = await getRow<{ stock_pcs: number; name: string }>(db, "SELECT stock_pcs, name FROM batches WHERE id=?", [
           a.batchId,
         ]);
         if (!b || Number(b.stock_pcs) < a.qty) {
           throw new ActionError(`Not enough stock for ${line.name}.`);
         }
-        run(db, "UPDATE batches SET stock_pcs = stock_pcs - ?, updated_at=? WHERE id=?", [
+        await run(db, "UPDATE batches SET stock_pcs = stock_pcs - ?, updated_at=? WHERE id=?", [
           a.qty,
           nowIso(),
           a.batchId,
@@ -443,12 +445,12 @@ export async function saveInvoiceEdit(input: {
       }
     }
 
-    run(db, "DELETE FROM invoice_allocations WHERE invoice_line_id IN (SELECT id FROM invoice_lines WHERE invoice_id=?)", [
+    await run(db, "DELETE FROM invoice_allocations WHERE invoice_line_id IN (SELECT id FROM invoice_lines WHERE invoice_id=?)", [
       input.id,
     ]);
-    run(db, "DELETE FROM invoice_lines WHERE invoice_id=?", [input.id]);
+    await run(db, "DELETE FROM invoice_lines WHERE invoice_id=?", [input.id]);
 
-    const cust = getRow<{
+    const cust = await getRow<{
       id: number;
       name: string;
       phone: string;
@@ -479,7 +481,7 @@ export async function saveInvoiceEdit(input: {
     profit -= totals.billDisc;
     const status = invoiceStatus(input.paidCents, ledger.unpaid);
     const when = nowIso();
-    run(
+    await run(
       db,
       `UPDATE invoices SET retail_subtotal_cents=?, item_discount_cents=?, subtotal_cents=?, bill_discount_cents=?,
        grand_total_cents=?, paid_cents=?, unpaid_cents=?, profit_cents=?, surplus_applied_cents=?,
@@ -502,7 +504,7 @@ export async function saveInvoiceEdit(input: {
       ],
     );
     for (const line of input.lines) {
-      const lineIns = run(
+      const lineIns = await run(
         db,
         `INSERT INTO invoice_lines (
           invoice_id, name, sale_unit, pack_size, qty_pcs, packets, retail_cents, disc_cents, disc_pct,
@@ -524,14 +526,14 @@ export async function saveInvoiceEdit(input: {
         ],
       );
       for (const a of line.allocations) {
-        run(
+        await run(
           db,
           `INSERT INTO invoice_allocations (invoice_line_id, batch_id, batch_no, qty, landed_cents) VALUES (?,?,?,?,?)`,
           [lineIns.id, a.batchId, a.batchNo, a.qty, a.landedCents],
         );
       }
     }
-    run(db, "UPDATE customers SET balance_cents=?, updated_at=? WHERE id=?", [
+    await run(db, "UPDATE customers SET balance_cents=?, updated_at=? WHERE id=?", [
       ledger.closingBalance,
       when,
       cust.id,
@@ -545,7 +547,7 @@ export async function allocateForQty(
   preferEqualAcrossName = false,
 ): Promise<Alloc[]> {
   const db = await getDb();
-  const primary = getRow<{
+  const primary = await getRow<{
     id: number;
     batch_no: number;
     stock_pcs: number;
@@ -564,14 +566,14 @@ export async function allocateForQty(
       },
     ];
   }
-  const siblings = allRows<{
+  const siblings = (await allRows<{
     id: number;
     batch_no: number;
     stock_pcs: number;
     landed_cents: number;
   }>(db, "SELECT id, batch_no, stock_pcs, landed_cents FROM batches WHERE lower(name)=lower(?) AND active=1 AND stock_pcs>0", [
     primary.name,
-  ]).map((b) => ({
+  ])).map((b) => ({
     id: Number(b.id),
     batchNo: Number(b.batch_no),
     stockPcs: Number(b.stock_pcs),

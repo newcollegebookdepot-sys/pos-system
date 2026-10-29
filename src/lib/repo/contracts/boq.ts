@@ -48,11 +48,11 @@ function map(row: Row): CtBoqItem {
 
 export async function listBoq(contractId: number, q = "") {
   const db = await getDb();
-  let rows = allRows<Row>(
+  let rows = (await allRows<Row>(
     db,
     "SELECT * FROM ct_boq_items WHERE contract_id = ? AND active = 1 ORDER BY serial_number",
     [contractId],
-  ).map(map);
+  )).map(map);
   const tokens = q
     .trim()
     .toLowerCase()
@@ -74,7 +74,7 @@ export async function searchBoq(contractId: number, q: string, limit = 40) {
 
 export async function getBoqItem(id: number) {
   const db = await getDb();
-  const row = getRow<Row>(db, "SELECT * FROM ct_boq_items WHERE id = ?", [id]);
+  const row = await getRow<Row>(db, "SELECT * FROM ct_boq_items WHERE id = ?", [id]);
   return row ? map(row) : null;
 }
 
@@ -96,7 +96,7 @@ export async function upsertBoqItem(input: {
   const when = nowIso();
   try {
     if (input.id) {
-      run(
+      await run(
         db,
         `UPDATE ct_boq_items SET serial_number=?, item_name=?, unit=?, comparative_cents=?, comparative_listed=?,
          ncbd_cents=?, notes=?, updated_at=? WHERE id=? AND contract_id=?`,
@@ -115,7 +115,7 @@ export async function upsertBoqItem(input: {
       );
       return input.id;
     }
-    const inserted = run(
+    const inserted = await run(
       db,
       `INSERT INTO ct_boq_items (contract_id, serial_number, item_name, unit, comparative_cents, comparative_listed, ncbd_cents, active, notes, created_at, updated_at)
        VALUES (?,?,?,?,?,?,?,1,?,?,?)`,
@@ -140,12 +140,12 @@ export async function upsertBoqItem(input: {
 
 export async function deleteBoqItem(id: number) {
   const db = await getDb();
-  run(db, "UPDATE ct_boq_items SET active = 0, updated_at = ? WHERE id = ?", [nowIso(), id]);
+  await run(db, "UPDATE ct_boq_items SET active = 0, updated_at = ? WHERE id = ?", [nowIso(), id]);
 }
 
 export async function wipeBoq(contractId: number) {
   const db = await getDb();
-  run(db, "DELETE FROM ct_boq_items WHERE contract_id = ?", [contractId]);
+  await run(db, "DELETE FROM ct_boq_items WHERE contract_id = ?", [contractId]);
 }
 
 /** CSV columns: serial,item_name,unit,comparative,ncbd[,listed] — prices in rupees */
@@ -184,7 +184,7 @@ export async function importBoqCsv(contractId: number, text: string) {
   const db = await getDb();
   let created = 0;
   let updated = 0;
-  withTransaction(db, () => {
+  await withTransaction(db, async () => {
     for (const line of lines.slice(1)) {
       const cols = split(line);
       const serial = Number(cols[iSerial >= 0 ? iSerial : 0]);
@@ -195,21 +195,21 @@ export async function importBoqCsv(contractId: number, text: string) {
       const ncbd = rupeesToCents(Number(String(cols[iNcbd >= 0 ? iNcbd : 4] || "0").replace(/,/g, "")));
       const listedRaw = iListed >= 0 ? cols[iListed] : "1";
       const listed = !/^(0|false|no|n)$/i.test(String(listedRaw || "1"));
-      const existing = getRow<{ id: number }>(
+      const existing = await getRow<{ id: number }>(
         db,
         "SELECT id FROM ct_boq_items WHERE contract_id = ? AND serial_number = ?",
         [contractId, serial],
       );
       const when = nowIso();
       if (existing) {
-        run(
+        await run(
           db,
           `UPDATE ct_boq_items SET item_name=?, unit=?, comparative_cents=?, comparative_listed=?, ncbd_cents=?, active=1, updated_at=? WHERE id=?`,
           [name, unit || null, compr, listed ? 1 : 0, ncbd, when, existing.id],
         );
         updated++;
       } else {
-        run(
+        await run(
           db,
           `INSERT INTO ct_boq_items (contract_id, serial_number, item_name, unit, comparative_cents, comparative_listed, ncbd_cents, active, notes, created_at, updated_at)
            VALUES (?,?,?,?,?,?,?,1,NULL,?,?)`,

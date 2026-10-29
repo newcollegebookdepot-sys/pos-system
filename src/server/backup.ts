@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { revalidatePath } from "next/cache";
 import { requireManager } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { allRows, execSql, getDb, run } from "@/lib/db";
 import { ActionError } from "@/lib/errors";
 import { nowIso } from "@/lib/format";
 import type { ActionState } from "@/lib/types";
@@ -34,7 +34,7 @@ export async function exportBackupJson(): Promise<{ ok: true; json: string } | {
     "arrivals",
   ];
   for (const t of tables) {
-    dump[t] = db.prepare(`SELECT * FROM ${t}`).all();
+    dump[t] = await allRows(db, `SELECT * FROM ${t}`);
   }
   return { ok: true, json: JSON.stringify(dump, null, 2) };
 }
@@ -61,10 +61,13 @@ export async function factoryReset(): Promise<ActionState> {
     "suppliers",
   ];
   for (const t of tables) {
-    db.exec(`DELETE FROM ${t}`);
+    await execSql(db, `DELETE FROM ${t}`);
   }
-  db.exec(`UPDATE customers SET balance_cents=0, opening_dues_cents=0, balance_manual=0, active=1 WHERE id=1`);
-  db.exec(`DELETE FROM customers WHERE id != 1`);
+  await execSql(
+    db,
+    `UPDATE customers SET balance_cents=0, opening_dues_cents=0, balance_manual=0, active=1 WHERE id=1`,
+  );
+  await execSql(db, `DELETE FROM customers WHERE id != 1`);
   revalidatePath("/", "layout");
   return { ok: true, message: "Factory reset complete (users/settings kept)" };
 }
@@ -74,29 +77,63 @@ export async function restoreBackupJson(json: string): Promise<ActionState> {
   try {
     const data = JSON.parse(json) as Record<string, unknown>;
     if (!data || typeof data !== "object") throw new ActionError("Invalid backup file.");
-    // Soft restore: write file alongside for manual inspection; full table restore is destructive
     const dir = path.join(process.cwd(), "data", "restores");
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `restore-${Date.now()}.json`);
     fs.writeFileSync(file, json);
-    // Apply customers + batches + settings if present (minimal safe restore)
+
     const db = await getDb();
     if (Array.isArray(data.batches)) {
-      db.exec("DELETE FROM batches");
-      for (const b of data.batches as Record<string, unknown>[]) {
-        db.prepare(
-          `INSERT OR REPLACE INTO batches (id, name, batch_no, batch_key, category, pack_size, stock_pcs, buy_cents, freight_cents, landed_cents, wholesale_cents, retail_cents, packing_label, active, created_at, updated_at)
-           VALUES (@id,@name,@batch_no,@batch_key,@category,@pack_size,@stock_pcs,@buy_cents,@freight_cents,@landed_cents,@wholesale_cents,@retail_cents,@packing_label,@active,@created_at,@updated_at)`,
-        ).run(b as never);
+      await execSql(db, "DELETE FROM batches");
+      for (const raw of data.batches as Record<string, unknown>[]) {
+        await run(
+          db,
+          `INSERT OR REPLACE INTO batches (
+            id, name, batch_no, batch_key, category, pack_size, stock_pcs, buy_cents, freight_cents,
+            landed_cents, wholesale_cents, retail_cents, packing_label, active, created_at, updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            Number(raw.id),
+            String(raw.name ?? ""),
+            Number(raw.batch_no ?? 1),
+            String(raw.batch_key ?? ""),
+            String(raw.category ?? "General"),
+            Number(raw.pack_size ?? 1),
+            Number(raw.stock_pcs ?? 0),
+            Number(raw.buy_cents ?? 0),
+            Number(raw.freight_cents ?? 0),
+            Number(raw.landed_cents ?? 0),
+            raw.wholesale_cents == null ? null : Number(raw.wholesale_cents),
+            Number(raw.retail_cents ?? 0),
+            raw.packing_label == null ? null : String(raw.packing_label),
+            Number(raw.active ?? 1),
+            String(raw.created_at ?? nowIso()),
+            String(raw.updated_at ?? nowIso()),
+          ],
+        );
       }
     }
     if (Array.isArray(data.customers)) {
-      for (const c of data.customers as Record<string, unknown>[]) {
-        if (Number(c.id) === 1) continue;
-        db.prepare(
-          `INSERT OR REPLACE INTO customers (id, name, phone, type, balance_cents, opening_dues_cents, balance_manual, active, created_at, updated_at)
-           VALUES (@id,@name,@phone,@type,@balance_cents,@opening_dues_cents,@balance_manual,@active,@created_at,@updated_at)`,
-        ).run(c as never);
+      for (const raw of data.customers as Record<string, unknown>[]) {
+        if (Number(raw.id) === 1) continue;
+        await run(
+          db,
+          `INSERT OR REPLACE INTO customers (
+            id, name, phone, type, balance_cents, opening_dues_cents, balance_manual, active, created_at, updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+          [
+            Number(raw.id),
+            String(raw.name ?? ""),
+            String(raw.phone ?? "N/A"),
+            String(raw.type ?? "Regular"),
+            Number(raw.balance_cents ?? 0),
+            Number(raw.opening_dues_cents ?? 0),
+            Number(raw.balance_manual ?? 0),
+            Number(raw.active ?? 1),
+            String(raw.created_at ?? nowIso()),
+            String(raw.updated_at ?? nowIso()),
+          ],
+        );
       }
     }
   } catch (error) {

@@ -7,7 +7,7 @@ import type { Operator, Settings } from "@/lib/types";
 
 export async function readSettings(): Promise<Settings | null> {
   const db = await getDb();
-  const row = getRow<{
+  const row = await getRow<{
     shop_name: string;
     currency_symbol: string;
     address: string;
@@ -37,7 +37,7 @@ export async function updateSettings(input: Partial<Settings> & { shopName?: str
   const cur = await readSettings();
   if (!cur) throw new ActionError("Set up the shop before changing settings.");
   const next = { ...cur, ...input };
-  run(
+  await run(
     db,
     `UPDATE settings SET shop_name=?, currency_symbol=?, address=?, phone=?, low_stock_threshold=?, print_terms=?, operator_name=? WHERE id=1`,
     [
@@ -63,32 +63,32 @@ export async function insertShopAndManager(input: {
 }) {
   const db = await getDb();
   const when = nowIso();
-  const existing = getRow<{ id: number }>(db, "SELECT id FROM settings WHERE id = 1");
+  const existing = await getRow<{ id: number }>(db, "SELECT id FROM settings WHERE id = 1");
   if (existing) throw new ActionError("This shop is already set up.");
-  run(
+  await run(
     db,
     `INSERT INTO settings (id, shop_name, currency_symbol, address, phone, low_stock_threshold, print_terms, operator_name, created_at)
      VALUES (1, ?, ?, ?, ?, 10, 'Goods once sold are not returnable unless defective.', ?, ?)`,
     [input.shopName, input.currencySymbol || "Rs.", input.address || "", input.phone || "", input.name, when],
   );
-  const user = run(
+  const user = await run(
     db,
     `INSERT INTO users (name, username, password_hash, role, active, created_at) VALUES (?, ?, ?, 'manager', 1, ?)`,
     [input.name, input.username, input.passwordHash, when],
   );
-  const op = getRow<{ id: number }>(db, "SELECT id FROM operators WHERE name = ? COLLATE NOCASE", [input.name]);
+  const op = await getRow<{ id: number }>(db, "SELECT id FROM operators WHERE name = ? COLLATE NOCASE", [input.name]);
   if (!op) {
-    run(db, "INSERT INTO operators (name, active, created_at) VALUES (?, 1, ?)", [input.name, when]);
+    await run(db, "INSERT INTO operators (name, active, created_at) VALUES (?, 1, ?)", [input.name, when]);
   }
   return user.id;
 }
 
 export async function listOperators() {
   const db = await getDb();
-  return allRows<{ id: number; name: string; active: number }>(
+  return (await allRows<{ id: number; name: string; active: number }>(
     db,
     "SELECT id, name, active FROM operators ORDER BY name COLLATE NOCASE",
-  ).map(
+  )).map(
     (r): Operator => ({
       id: Number(r.id),
       name: r.name,
@@ -105,10 +105,10 @@ export async function upsertOperator(name: string) {
   const db = await getDb();
   const trimmed = name.trim();
   if (!trimmed) throw new ActionError("Operator name is required.");
-  const existing = getRow<{ id: number }>(db, "SELECT id FROM operators WHERE name = ? COLLATE NOCASE", [trimmed]);
+  const existing = await getRow<{ id: number }>(db, "SELECT id FROM operators WHERE name = ? COLLATE NOCASE", [trimmed]);
   if (existing) {
-    run(db, "UPDATE operators SET active = 1 WHERE id = ?", [existing.id]);
+    await run(db, "UPDATE operators SET active = 1 WHERE id = ?", [existing.id]);
     return existing.id;
   }
-  return run(db, "INSERT INTO operators (name, active, created_at) VALUES (?, 1, ?)", [trimmed, nowIso()]).id;
+  return (await run(db, "INSERT INTO operators (name, active, created_at) VALUES (?, 1, ?)", [trimmed, nowIso()])).id;
 }

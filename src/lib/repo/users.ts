@@ -28,7 +28,7 @@ export type AuthUser = PublicUser & { passwordHash: string };
 
 export async function findUserByUsername(username: string): Promise<AuthUser | null> {
   const db = await getDb();
-  const row = getRow<UserRow>(
+  const row = await getRow<UserRow>(
     db,
     "SELECT id, name, username, password_hash, role, active FROM users WHERE username = ?",
     [username],
@@ -39,7 +39,7 @@ export async function findUserByUsername(username: string): Promise<AuthUser | n
 
 export async function findActiveUserById(id: number): Promise<PublicUser | null> {
   const db = await getDb();
-  const row = getRow<UserRow>(
+  const row = await getRow<UserRow>(
     db,
     "SELECT id, name, username, role, active FROM users WHERE id = ? AND active = 1",
     [id],
@@ -49,11 +49,11 @@ export async function findActiveUserById(id: number): Promise<PublicUser | null>
 
 export async function listUsers() {
   const db = await getDb();
-  return allRows<UserRow>(
+  return (await allRows<UserRow>(
     db,
     `SELECT id, name, username, role, active FROM users
      ORDER BY CASE role WHEN 'manager' THEN 0 ELSE 1 END, name COLLATE NOCASE`,
-  ).map(mapUser);
+  )).map(mapUser);
 }
 
 export async function insertUser(input: {
@@ -64,7 +64,7 @@ export async function insertUser(input: {
 }) {
   const db = await getDb();
   try {
-    run(db, "INSERT INTO users (name, username, password_hash, role, active, created_at) VALUES (?, ?, ?, ?, 1, ?)", [
+    await run(db, "INSERT INTO users (name, username, password_hash, role, active, created_at) VALUES (?, ?, ?, ?, 1, ?)", [
       input.name,
       input.username,
       input.passwordHash,
@@ -79,41 +79,41 @@ export async function insertUser(input: {
 
 export async function updateUserRole(userId: number, role: Role) {
   const db = await getDb();
-  withTransaction(db, () => {
-    const row = getRow<UserRow>(db, "SELECT id, name, username, role, active FROM users WHERE id = ?", [userId]);
+  await withTransaction(db, async () => {
+    const row = await getRow<UserRow>(db, "SELECT id, name, username, role, active FROM users WHERE id = ?", [userId]);
     if (!row) throw new ActionError("That staff login was not found.");
     if (row.role === "manager" && Number(row.active) === 1 && role === "cashier") {
-      const others = getRow<{ count: number }>(
+      const others = await getRow<{ count: number }>(
         db,
         "SELECT COUNT(*) AS count FROM users WHERE role = 'manager' AND active = 1 AND id != ?",
         [userId],
       );
       if (Number(others?.count ?? 0) < 1) throw new ActionError("Add another manager before changing this role.");
     }
-    run(db, "UPDATE users SET role = ? WHERE id = ?", [role, userId]);
+    await run(db, "UPDATE users SET role = ? WHERE id = ?", [role, userId]);
   });
 }
 
 export async function updateUserActive(userId: number, active: boolean, actorId: number) {
   const db = await getDb();
-  withTransaction(db, () => {
-    const row = getRow<UserRow>(db, "SELECT id, name, username, role, active FROM users WHERE id = ?", [userId]);
+  await withTransaction(db, async () => {
+    const row = await getRow<UserRow>(db, "SELECT id, name, username, role, active FROM users WHERE id = ?", [userId]);
     if (!row) throw new ActionError("That staff login was not found.");
     if (!active && userId === actorId) throw new ActionError("You cannot deactivate your own login.");
     if (!active && row.role === "manager" && Number(row.active) === 1) {
-      const others = getRow<{ count: number }>(
+      const others = await getRow<{ count: number }>(
         db,
         "SELECT COUNT(*) AS count FROM users WHERE role = 'manager' AND active = 1 AND id != ?",
         [userId],
       );
       if (Number(others?.count ?? 0) < 1) throw new ActionError("Add another manager before deactivating this one.");
     }
-    run(db, "UPDATE users SET active = ? WHERE id = ?", [active ? 1 : 0, userId]);
+    await run(db, "UPDATE users SET active = ? WHERE id = ?", [active ? 1 : 0, userId]);
   });
 }
 
 export async function updateUserPassword(userId: number, passwordHash: string) {
   const db = await getDb();
-  const updated = run(db, "UPDATE users SET password_hash = ? WHERE id = ?", [passwordHash, userId]);
+  const updated = await run(db, "UPDATE users SET password_hash = ? WHERE id = ?", [passwordHash, userId]);
   if (updated.changes !== 1) throw new ActionError("That staff login was not found.");
 }

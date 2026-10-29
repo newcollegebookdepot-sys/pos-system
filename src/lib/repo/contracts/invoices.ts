@@ -151,11 +151,11 @@ function withTotals(inv: InvRow, entries: CtSupplyEntry[]): CtInvoice {
 
 export async function suggestInvoiceNumber(contractId: number) {
   const db = await getDb();
-  const nums = allRows<{ invoice_number: string }>(
+  const nums = (await allRows<{ invoice_number: string }>(
     db,
     "SELECT invoice_number FROM ct_invoices WHERE contract_id = ?",
     [contractId],
-  ).map((r) => r.invoice_number);
+  )).map((r) => r.invoice_number);
   return nextInvoiceNumber(nums);
 }
 
@@ -171,7 +171,7 @@ export async function listCtInvoices(opts: { contractId?: number; status?: strin
     where.push("i.status = ?");
     params.push(opts.status);
   }
-  const rows = allRows<InvRow>(
+  const rows = await allRows<InvRow>(
     db,
     `SELECT i.*, c.office_name, c.contract_head, f.name AS firm_name
      FROM ct_invoices i
@@ -183,11 +183,11 @@ export async function listCtInvoices(opts: { contractId?: number; status?: strin
   );
   const result: CtInvoice[] = [];
   for (const row of rows) {
-    const entries = allRows<EntRow>(
+    const entries = (await allRows<EntRow>(
       db,
       "SELECT * FROM ct_supply_entries WHERE invoice_id = ? ORDER BY id",
       [row.id],
-    ).map(mapEntry);
+    )).map(mapEntry);
     result.push(withTotals(row, entries));
   }
   return result;
@@ -195,7 +195,7 @@ export async function listCtInvoices(opts: { contractId?: number; status?: strin
 
 export async function getCtInvoice(id: number) {
   const db = await getDb();
-  const row = getRow<InvRow>(
+  const row = await getRow<InvRow>(
     db,
     `SELECT i.*, c.office_name, c.contract_head, f.name AS firm_name
      FROM ct_invoices i
@@ -205,11 +205,11 @@ export async function getCtInvoice(id: number) {
     [id],
   );
   if (!row) return null;
-  const entries = allRows<EntRow>(
+  const entries = (await allRows<EntRow>(
     db,
     "SELECT * FROM ct_supply_entries WHERE invoice_id = ? ORDER BY id",
     [id],
-  ).map(mapEntry);
+  )).map(mapEntry);
   return withTotals(row, entries);
 }
 
@@ -241,7 +241,7 @@ export type ComposerPayload = {
   lines: ComposerLinePayload[];
 };
 
-function replaceLines(
+async function replaceLines(
   db: Awaited<ReturnType<typeof getDb>>,
   invoiceId: number,
   contractId: number,
@@ -253,7 +253,7 @@ function replaceLines(
   const demandNo = payload.demandNo?.trim() || null;
   let entryKind: CtEntryKind = payload.entryKind === "cash_alternate" ? "cash_alternate" : "normal";
 
-  run(db, "DELETE FROM ct_supply_entries WHERE invoice_id = ?", [invoiceId]);
+  await run(db, "DELETE FROM ct_supply_entries WHERE invoice_id = ?", [invoiceId]);
 
   for (const raw of payload.lines) {
     const itemName = raw.itemName.trim();
@@ -277,7 +277,7 @@ function replaceLines(
     let listed = raw.comparativeListed !== false;
     let serial: number | null = listed && raw.comparativeSerial != null ? Number(raw.comparativeSerial) : null;
     if (raw.boqItemId) {
-      const boq = getRow<{
+      const boq = await getRow<{
         contract_id: number;
         serial_number: number;
         comparative_listed: number;
@@ -294,7 +294,7 @@ function replaceLines(
     const kind: CtEntryKind =
       raw.entryKind === "cash_alternate" || raw.entryKind === "normal" ? raw.entryKind : entryKind;
 
-    run(
+    await run(
       db,
       `INSERT INTO ct_supply_entries (
         contract_id, invoice_id, boq_item_id, entry_date, item_name, unit, qty_milli,
@@ -337,20 +337,20 @@ export async function createCtInvoice(payload: ComposerPayload) {
   const db = await getDb();
   const when = nowIso();
   const number = (payload.invoiceNumber || "").trim() || (await suggestInvoiceNumber(payload.contractId));
-  const clash = getRow(db, "SELECT id FROM ct_invoices WHERE contract_id = ? AND invoice_number = ?", [
+  const clash = await getRow(db, "SELECT id FROM ct_invoices WHERE contract_id = ? AND invoice_number = ?", [
     payload.contractId,
     number,
   ]);
   if (clash) throw new ActionError("Invoice number already used.");
 
-  return withTransaction(db, () => {
-    const inserted = run(
+  return await withTransaction(db, async () => {
+    const inserted = await run(
       db,
       `INSERT INTO ct_invoices (contract_id, invoice_number, iso_date, status, notes, billed_at, created_at, updated_at)
        VALUES (?,?,?,'draft',?,NULL,?,?)`,
       [payload.contractId, number, payload.isoDate.slice(0, 10), payload.notes?.trim() || null, when, when],
     );
-    replaceLines(db, inserted.id, payload.contractId, { ...payload, invoiceNumber: number });
+    await replaceLines(db, inserted.id, payload.contractId, { ...payload, invoiceNumber: number });
     return inserted.id;
   });
 }
@@ -362,27 +362,27 @@ export async function updateCtInvoice(invoiceId: number, payload: ComposerPayloa
   const when = nowIso();
   const number = (payload.invoiceNumber || existing.invoiceNumber).trim();
   if (number !== existing.invoiceNumber) {
-    const clash = getRow(
+    const clash = await getRow(
       db,
       "SELECT id FROM ct_invoices WHERE contract_id = ? AND invoice_number = ? AND id != ?",
       [existing.contractId, number, invoiceId],
     );
     if (clash) throw new ActionError("Invoice number already used.");
   }
-  withTransaction(db, () => {
-    run(
+  await withTransaction(db, async () => {
+    await run(
       db,
       `UPDATE ct_invoices SET invoice_number=?, iso_date=?, notes=?, updated_at=? WHERE id=?`,
       [number, payload.isoDate.slice(0, 10), payload.notes?.trim() || null, when, invoiceId],
     );
-    replaceLines(db, invoiceId, existing.contractId, { ...payload, invoiceNumber: number });
+    await replaceLines(db, invoiceId, existing.contractId, { ...payload, invoiceNumber: number });
   });
 }
 
 export async function markCtInvoiceBilled(invoiceId: number) {
   const db = await getDb();
   const when = nowIso();
-  const r = run(
+  const r = await run(
     db,
     `UPDATE ct_invoices SET status='billed', billed_at=COALESCE(billed_at, ?), updated_at=? WHERE id=?`,
     [when, when, invoiceId],
@@ -392,7 +392,7 @@ export async function markCtInvoiceBilled(invoiceId: number) {
 
 export async function markCtInvoiceDraft(invoiceId: number) {
   const db = await getDb();
-  const r = run(
+  const r = await run(
     db,
     `UPDATE ct_invoices SET status='draft', billed_at=NULL, updated_at=? WHERE id=?`,
     [nowIso(), invoiceId],
@@ -402,9 +402,9 @@ export async function markCtInvoiceDraft(invoiceId: number) {
 
 export async function deleteCtInvoice(invoiceId: number) {
   const db = await getDb();
-  withTransaction(db, () => {
-    run(db, "DELETE FROM ct_supply_entries WHERE invoice_id = ?", [invoiceId]);
-    const r = run(db, "DELETE FROM ct_invoices WHERE id = ?", [invoiceId]);
+  await withTransaction(db, async () => {
+    await run(db, "DELETE FROM ct_supply_entries WHERE invoice_id = ?", [invoiceId]);
+    const r = await run(db, "DELETE FROM ct_invoices WHERE id = ?", [invoiceId]);
     if (r.changes !== 1) throw new ActionError("Invoice not found.");
   });
 }

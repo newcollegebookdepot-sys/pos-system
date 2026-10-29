@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # Required at runtime (set in Netlify UI → Environment variables):
+  #   TURSO_DATABASE_URL
+  #   TURSO_AUTH_TOKEN
+  #   SESSION_SECRET
+
+# Next.js is auto-detected; do not pin @netlify/plugin-nextjs.

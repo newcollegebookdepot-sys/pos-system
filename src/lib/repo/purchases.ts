@@ -3,7 +3,7 @@ import "server-only";
 import { allocateFreightByValue } from "@/lib/domain/batching";
 import { upsertBatch } from "@/lib/repo/batches";
 import { createPayable, createSupplier } from "@/lib/repo/payables";
-import { getDb, run } from "@/lib/db";
+import { getDb, getRow, run } from "@/lib/db";
 import { ActionError } from "@/lib/errors";
 import { nowIso } from "@/lib/format";
 import { roundCents } from "@/lib/money";
@@ -37,10 +37,10 @@ export async function completeBulkPurchase(input: {
   );
   const db = await getDb();
   const when = nowIso();
-  const countRow = db.prepare("SELECT COUNT(*) AS n FROM purchases").get() as { n: number };
-  const purchaseNumber = `PUR-${1000 + Number(countRow.n) + 1}`;
+  const countRow = await getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM purchases");
+  const purchaseNumber = `PUR-${1000 + Number(countRow?.n || 0) + 1}`;
   const goods = input.lines.reduce((s, l) => s + l.qtyPcs * l.buyCents, 0);
-  const purchaseId = run(
+  const purchaseId = (await run(
     db,
     `INSERT INTO purchases (purchase_number, kind, supplier_id, supplier_name, ref_no, freight_total_cents, freight_bill_t, goods_subtotal_cents, operator_name, iso_date, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
@@ -57,7 +57,7 @@ export async function completeBulkPurchase(input: {
       input.isoDate,
       when,
     ],
-  ).id;
+  )).id;
 
   for (let i = 0; i < input.lines.length; i++) {
     const line = input.lines[i];
@@ -72,7 +72,7 @@ export async function completeBulkPurchase(input: {
       wholesaleCents: line.wholesaleCents,
       packSize: line.packSize,
     });
-    run(
+    await run(
       db,
       `INSERT INTO purchase_lines (purchase_id, batch_id, name, category, qty_pcs, pack_size, buy_cents, freight_u_cents, landed_cents, retail_cents, batch_no)
        VALUES (?,?,?,?,?,?,?,?,?,?,NULL)`,
@@ -137,9 +137,9 @@ export async function completeCreditPurchase(input: {
   const goods = input.lines.reduce((s, l) => s + l.qtyPcs * l.buyCents, 0);
   const db = await getDb();
   const when = nowIso();
-  const countRow = db.prepare("SELECT COUNT(*) AS n FROM purchases").get() as { n: number };
-  const purchaseNumber = `PUR-${1000 + Number(countRow.n) + 1}`;
-  const purchaseId = run(
+  const countRow = await getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM purchases");
+  const purchaseNumber = `PUR-${1000 + Number(countRow?.n || 0) + 1}`;
+  const purchaseId = (await run(
     db,
     `INSERT INTO purchases (purchase_number, kind, supplier_id, supplier_name, ref_no, freight_total_cents, freight_bill_t, goods_subtotal_cents, operator_name, iso_date, created_at)
      VALUES (?,?,NULL,?,?,0,NULL,?,?,?,?)`,
@@ -153,7 +153,7 @@ export async function completeCreditPurchase(input: {
       input.isoDate,
       when,
     ],
-  ).id;
+  )).id;
 
   for (const line of input.lines) {
     const result = await upsertBatch({
@@ -166,7 +166,7 @@ export async function completeCreditPurchase(input: {
       wholesaleCents: line.wholesaleCents,
       packSize: line.packSize,
     });
-    run(
+    await run(
       db,
       `INSERT INTO purchase_lines (purchase_id, batch_id, name, category, qty_pcs, pack_size, buy_cents, freight_u_cents, landed_cents, retail_cents, batch_no)
        VALUES (?,?,?,?,?,?,?,0,?,?,NULL)`,

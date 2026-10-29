@@ -59,21 +59,21 @@ const SELECT = `SELECT c.*, f.name AS firm_name, f.vendor_number
 
 export async function listContracts() {
   const db = await getDb();
-  return allRows<Row>(
+  return (await allRows<Row>(
     db,
     `${SELECT} ORDER BY c.office_name COLLATE NOCASE, c.contract_head COLLATE NOCASE`,
-  ).map(map);
+  )).map(map);
 }
 
 export async function getContract(id: number) {
   const db = await getDb();
-  const row = getRow<Row>(db, `${SELECT} WHERE c.id = ?`, [id]);
+  const row = await getRow<Row>(db, `${SELECT} WHERE c.id = ?`, [id]);
   return row ? map(row) : null;
 }
 
 export async function listOffices(q = "") {
   const db = await getDb();
-  let rows = allRows<{ office_name: string }>(
+  let rows = await allRows<{ office_name: string }>(
     db,
     "SELECT DISTINCT office_name FROM ct_contracts ORDER BY office_name COLLATE NOCASE",
   );
@@ -84,11 +84,11 @@ export async function listOffices(q = "") {
 
 export async function contractsForOffice(office: string) {
   const db = await getDb();
-  return allRows<Row>(
+  return (await allRows<Row>(
     db,
     `${SELECT} WHERE lower(c.office_name) = lower(?) ORDER BY c.contract_head COLLATE NOCASE, f.name COLLATE NOCASE`,
     [office.trim()],
-  ).map(map);
+  )).map(map);
 }
 
 export async function upsertContract(input: {
@@ -107,13 +107,13 @@ export async function upsertContract(input: {
   const head = input.contractHead.trim().replace(/\s+/g, " ");
   if (!office) throw new ActionError("Office name is required.");
   if (!head) throw new ActionError("Contract head is required.");
-  const firm = getRow(db, "SELECT id FROM ct_firms WHERE id = ?", [input.firmId]);
+  const firm = await getRow(db, "SELECT id FROM ct_firms WHERE id = ?", [input.firmId]);
   if (!firm) throw new ActionError("Select a firm.");
   const when = nowIso();
   const status = input.status || "active";
   try {
     if (input.id) {
-      const updated = run(
+      const updated = await run(
         db,
         `UPDATE ct_contracts SET firm_id=?, office_name=?, contract_head=?, contract_number=?, start_date=?, end_date=?, status=?, notes=?, updated_at=?
          WHERE id=?`,
@@ -133,7 +133,7 @@ export async function upsertContract(input: {
       if (updated.changes !== 1) throw new ActionError("Contract not found.");
       return input.id;
     }
-    const inserted = run(
+    const inserted = await run(
       db,
       `INSERT INTO ct_contracts (firm_id, office_name, contract_head, contract_number, start_date, end_date, status, notes, created_at, updated_at)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -159,19 +159,19 @@ export async function upsertContract(input: {
 
 export async function deleteContract(id: number) {
   const db = await getDb();
-  withTransaction(db, () => {
-    run(db, "DELETE FROM ct_payments WHERE contract_id = ?", [id]);
-    run(db, "DELETE FROM ct_supply_entries WHERE contract_id = ?", [id]);
-    run(db, "DELETE FROM ct_invoices WHERE contract_id = ?", [id]);
-    run(db, "DELETE FROM ct_boq_items WHERE contract_id = ?", [id]);
-    const r = run(db, "DELETE FROM ct_contracts WHERE id = ?", [id]);
+  await withTransaction(db, async () => {
+    await run(db, "DELETE FROM ct_payments WHERE contract_id = ?", [id]);
+    await run(db, "DELETE FROM ct_supply_entries WHERE contract_id = ?", [id]);
+    await run(db, "DELETE FROM ct_invoices WHERE contract_id = ?", [id]);
+    await run(db, "DELETE FROM ct_boq_items WHERE contract_id = ?", [id]);
+    const r = await run(db, "DELETE FROM ct_contracts WHERE id = ?", [id]);
     if (r.changes !== 1) throw new ActionError("Contract not found.");
   });
 }
 
 export async function contractSummary(contractId: number) {
   const db = await getDb();
-  const entries = allRows<{
+  const entries = (await allRows<{
     entry_kind: string;
     comparative_total_cents: number;
     ncbd_total_cents: number;
@@ -184,7 +184,7 @@ export async function contractSummary(contractId: number) {
      LEFT JOIN ct_invoices i ON i.id = e.invoice_id
      WHERE e.contract_id = ?`,
     [contractId],
-  ).map((e): EntryForSummary => {
+  )).map((e): EntryForSummary => {
     let billingState: EntryForSummary["billingState"] = "unbilled";
     if (e.invoice_id == null) billingState = "unbilled";
     else if (e.invoice_status === "billed") billingState = "billed";
@@ -196,7 +196,7 @@ export async function contractSummary(contractId: number) {
       billingState,
     };
   });
-  const received = getRow<{ s: number }>(
+  const received = await getRow<{ s: number }>(
     db,
     "SELECT COALESCE(SUM(amount_cents),0) AS s FROM ct_payments WHERE contract_id = ?",
     [contractId],
@@ -227,12 +227,12 @@ export async function officeSummary(officeName: string) {
 
 export async function contractsDashboardStats() {
   const db = await getDb();
-  const firms = getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM ct_firms WHERE active = 1");
-  const contracts = getRow<{ n: number }>(
+  const firms = await getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM ct_firms WHERE active = 1");
+  const contracts = await getRow<{ n: number }>(
     db,
     "SELECT COUNT(*) AS n FROM ct_contracts WHERE status = 'active'",
   );
-  const boq = getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM ct_boq_items WHERE active = 1");
+  const boq = await getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM ct_boq_items WHERE active = 1");
   const recent = await listContracts();
   return {
     firms: Number(firms?.n || 0),

@@ -1,402 +1,50 @@
 import "server-only";
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import fs from "node:fs";
 import path from "node:path";
+import { createClient, type Client, type Transaction } from "@libsql/client";
 import { DatabaseSync } from "node:sqlite";
 import { connection } from "next/server";
+import { SCHEMA_SQL } from "@/lib/schema-sql";
 
-const globalForDb = globalThis as unknown as { posDb?: DatabaseSync };
+export type SqlValue = string | number | null | bigint | ArrayBuffer;
 
-type SqlValue = string | number | null | bigint;
+type LocalHandle = { kind: "local"; db: DatabaseSync };
+type TursoHandle = { kind: "turso"; client: Client };
+export type PosDb = LocalHandle | TursoHandle;
 
-function migrate(db: DatabaseSync) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS settings (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      shop_name TEXT NOT NULL,
-      currency_symbol TEXT NOT NULL DEFAULT 'Rs.',
-      address TEXT NOT NULL DEFAULT '',
-      phone TEXT NOT NULL DEFAULT '',
-      low_stock_threshold INTEGER NOT NULL DEFAULT 10,
-      print_terms TEXT NOT NULL DEFAULT 'Goods once sold are not returnable unless defective.',
-      operator_name TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL
-    ) STRICT;
+const tursoTx = new AsyncLocalStorage<Transaction>();
 
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      username TEXT NOT NULL COLLATE NOCASE UNIQUE,
-      password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('cashier', 'manager')),
-      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-      created_at TEXT NOT NULL
-    ) STRICT;
+const globalForDb = globalThis as unknown as {
+  posDb?: PosDb;
+  posDbMigrated?: boolean;
+};
 
-    CREATE TABLE IF NOT EXISTS operators (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-      created_at TEXT NOT NULL
-    ) STRICT;
+function tursoConfigured() {
+  return Boolean(process.env.TURSO_DATABASE_URL?.trim());
+}
 
-    CREATE TABLE IF NOT EXISTS batches (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      batch_no INTEGER NOT NULL CHECK (batch_no >= 1),
-      batch_key TEXT NOT NULL UNIQUE,
-      category TEXT NOT NULL DEFAULT 'General',
-      pack_size INTEGER NOT NULL DEFAULT 1 CHECK (pack_size >= 1),
-      stock_pcs INTEGER NOT NULL DEFAULT 0,
-      buy_cents INTEGER NOT NULL DEFAULT 0,
-      freight_cents INTEGER NOT NULL DEFAULT 0,
-      landed_cents INTEGER NOT NULL DEFAULT 0,
-      wholesale_cents INTEGER,
-      retail_cents INTEGER NOT NULL DEFAULT 0,
-      packing_label TEXT,
-      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    ) STRICT;
+function splitStatements(sql: string) {
+  return sql
+    .split(";")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
-    CREATE TABLE IF NOT EXISTS customers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      phone TEXT NOT NULL DEFAULT 'N/A',
-      type TEXT NOT NULL DEFAULT 'Regular' CHECK (type IN ('Regular','Office','School','Wholesale')),
-      balance_cents INTEGER NOT NULL DEFAULT 0,
-      opening_dues_cents INTEGER NOT NULL DEFAULT 0,
-      balance_manual INTEGER NOT NULL DEFAULT 0 CHECK (balance_manual IN (0, 1)),
-      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    ) STRICT;
+function asArgs(params: SqlValue[]) {
+  return params.map((p) => (typeof p === "bigint" ? Number(p) : p));
+}
 
-    CREATE TABLE IF NOT EXISTS invoices (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      invoice_number TEXT NOT NULL UNIQUE,
-      iso_date TEXT NOT NULL,
-      customer_id INTEGER NOT NULL REFERENCES customers(id),
-      customer_name TEXT NOT NULL,
-      customer_phone TEXT NOT NULL,
-      customer_type TEXT NOT NULL,
-      operator_name TEXT NOT NULL,
-      retail_subtotal_cents INTEGER NOT NULL DEFAULT 0,
-      item_discount_cents INTEGER NOT NULL DEFAULT 0,
-      subtotal_cents INTEGER NOT NULL DEFAULT 0,
-      bill_discount_cents INTEGER NOT NULL DEFAULT 0,
-      grand_total_cents INTEGER NOT NULL DEFAULT 0,
-      paid_cents INTEGER NOT NULL DEFAULT 0,
-      unpaid_cents INTEGER NOT NULL DEFAULT 0,
-      profit_cents INTEGER NOT NULL DEFAULT 0,
-      surplus_applied_cents INTEGER NOT NULL DEFAULT 0,
-      prev_balance_cents INTEGER NOT NULL DEFAULT 0,
-      closing_balance_cents INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL CHECK (status IN ('Paid','Partial','Unpaid')),
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    ) STRICT;
+async function tursoExecute(client: Client, sql: string, params: SqlValue[] = []) {
+  const tx = tursoTx.getStore();
+  const payload = { sql, args: asArgs(params) };
+  if (tx) return tx.execute(payload);
+  return client.execute(payload);
+}
 
-    CREATE TABLE IF NOT EXISTS invoice_lines (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      sale_unit TEXT NOT NULL CHECK (sale_unit IN ('pcs','pkt')),
-      pack_size INTEGER NOT NULL DEFAULT 1,
-      qty_pcs INTEGER NOT NULL,
-      packets REAL NOT NULL DEFAULT 0,
-      retail_cents INTEGER NOT NULL,
-      disc_cents INTEGER NOT NULL,
-      disc_pct REAL NOT NULL DEFAULT 0,
-      retail_total_cents INTEGER NOT NULL,
-      saved_cents INTEGER NOT NULL DEFAULT 0,
-      line_total_cents INTEGER NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS invoice_allocations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      invoice_line_id INTEGER NOT NULL REFERENCES invoice_lines(id) ON DELETE CASCADE,
-      batch_id INTEGER NOT NULL REFERENCES batches(id),
-      batch_no INTEGER NOT NULL,
-      qty INTEGER NOT NULL,
-      landed_cents INTEGER NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS sale_drafts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      draft_number TEXT NOT NULL UNIQUE,
-      customer_id INTEGER NOT NULL,
-      customer_name TEXT NOT NULL,
-      bill_discount_cents INTEGER NOT NULL DEFAULT 0,
-      paid_cents INTEGER NOT NULL DEFAULT 0,
-      cart_json TEXT NOT NULL,
-      operator_name TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS cart_reservations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL REFERENCES users(id),
-      batch_id INTEGER NOT NULL REFERENCES batches(id),
-      qty INTEGER NOT NULL CHECK (qty > 0),
-      client_key TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      UNIQUE(user_id, client_key, batch_id)
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS receipts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      receipt_number TEXT NOT NULL UNIQUE,
-      customer_id INTEGER NOT NULL REFERENCES customers(id),
-      customer_name TEXT NOT NULL,
-      amount_cents INTEGER NOT NULL,
-      mode TEXT NOT NULL CHECK (mode IN ('Cash','Bank·Easypaisa')),
-      prev_balance_cents INTEGER NOT NULL,
-      new_balance_cents INTEGER NOT NULL,
-      operator_name TEXT NOT NULL,
-      iso_date TEXT NOT NULL,
-      note TEXT,
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS surplus_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      log_number TEXT NOT NULL UNIQUE,
-      customer_id INTEGER NOT NULL REFERENCES customers(id),
-      customer_name TEXT NOT NULL,
-      prev_surplus_cents INTEGER NOT NULL,
-      new_surplus_cents INTEGER NOT NULL,
-      note TEXT,
-      operator_name TEXT NOT NULL,
-      iso_date TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS suppliers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-      phone TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS purchases (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      purchase_number TEXT NOT NULL UNIQUE,
-      kind TEXT NOT NULL CHECK (kind IN ('bulk','credit')),
-      supplier_id INTEGER REFERENCES suppliers(id),
-      supplier_name TEXT NOT NULL,
-      ref_no TEXT,
-      freight_total_cents INTEGER NOT NULL DEFAULT 0,
-      freight_bill_t TEXT,
-      goods_subtotal_cents INTEGER NOT NULL DEFAULT 0,
-      operator_name TEXT NOT NULL,
-      iso_date TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS purchase_lines (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      purchase_id INTEGER NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
-      batch_id INTEGER REFERENCES batches(id),
-      name TEXT NOT NULL,
-      category TEXT NOT NULL,
-      qty_pcs INTEGER NOT NULL,
-      pack_size INTEGER NOT NULL DEFAULT 1,
-      buy_cents INTEGER NOT NULL,
-      freight_u_cents INTEGER NOT NULL DEFAULT 0,
-      landed_cents INTEGER NOT NULL,
-      retail_cents INTEGER NOT NULL,
-      batch_no INTEGER
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS payables (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind TEXT NOT NULL CHECK (kind IN ('supplier','freight','borrow')),
-      party_name TEXT NOT NULL,
-      bill_no TEXT,
-      description TEXT,
-      iso_date TEXT NOT NULL,
-      total_cents INTEGER NOT NULL,
-      paid_cents INTEGER NOT NULL DEFAULT 0,
-      unpaid_cents INTEGER NOT NULL,
-      purchase_id INTEGER REFERENCES purchases(id),
-      operator_name TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS payable_payments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      payable_id INTEGER NOT NULL REFERENCES payables(id) ON DELETE CASCADE,
-      amount_cents INTEGER NOT NULL,
-      iso_date TEXT NOT NULL,
-      cash_entry_id INTEGER,
-      note TEXT,
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS cash_book_openings (
-      period_key TEXT PRIMARY KEY,
-      amount_cents INTEGER NOT NULL DEFAULT 0,
-      updated_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS cash_book_entries (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      iso_date TEXT NOT NULL,
-      type TEXT NOT NULL CHECK (type IN ('cash_in','cash_out','stock_purchase','freight','rent','meal','zakat','other')),
-      amount_cents INTEGER NOT NULL,
-      description TEXT NOT NULL DEFAULT '',
-      seller TEXT,
-      bill_no TEXT,
-      rent_month TEXT,
-      auto INTEGER NOT NULL DEFAULT 0 CHECK (auto IN (0, 1)),
-      payable_id INTEGER,
-      purchase_id INTEGER,
-      arrival_id INTEGER,
-      operator_name TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS arrivals (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      seller_name TEXT NOT NULL,
-      bill_t_no TEXT,
-      advance_cents INTEGER NOT NULL DEFAULT 0,
-      bill_t_amount_cents INTEGER NOT NULL DEFAULT 0,
-      bill_t_paid_cents INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL CHECK (status IN ('pending','reached','completed')),
-      advance_date TEXT NOT NULL,
-      reached_date TEXT,
-      note TEXT,
-      advance_cash_id INTEGER,
-      operator_name TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS undo_stack (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      expires_at INTEGER NOT NULL,
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS ct_firms (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-      legal_name TEXT,
-      address TEXT,
-      phone TEXT,
-      email TEXT,
-      gstin TEXT,
-      vendor_number TEXT,
-      bank_name TEXT,
-      account_holder TEXT,
-      account_number TEXT,
-      branch_name TEXT,
-      notes TEXT,
-      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS ct_contracts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      firm_id INTEGER NOT NULL REFERENCES ct_firms(id),
-      office_name TEXT NOT NULL,
-      contract_head TEXT NOT NULL,
-      contract_number TEXT,
-      start_date TEXT,
-      end_date TEXT,
-      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','suspended','cancelled')),
-      notes TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE (office_name, contract_head, firm_id)
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS ct_boq_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      contract_id INTEGER NOT NULL REFERENCES ct_contracts(id) ON DELETE CASCADE,
-      serial_number INTEGER NOT NULL,
-      item_name TEXT NOT NULL,
-      unit TEXT,
-      comparative_cents INTEGER NOT NULL DEFAULT 0,
-      comparative_listed INTEGER NOT NULL DEFAULT 1 CHECK (comparative_listed IN (0, 1)),
-      ncbd_cents INTEGER NOT NULL DEFAULT 0,
-      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-      notes TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE (contract_id, serial_number)
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS ct_invoices (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      contract_id INTEGER NOT NULL REFERENCES ct_contracts(id),
-      invoice_number TEXT NOT NULL,
-      iso_date TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','billed')),
-      notes TEXT,
-      billed_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE (contract_id, invoice_number)
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS ct_supply_entries (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      contract_id INTEGER NOT NULL REFERENCES ct_contracts(id),
-      invoice_id INTEGER REFERENCES ct_invoices(id) ON DELETE CASCADE,
-      boq_item_id INTEGER REFERENCES ct_boq_items(id),
-      entry_date TEXT NOT NULL,
-      item_name TEXT NOT NULL,
-      unit TEXT,
-      qty_milli INTEGER NOT NULL DEFAULT 1000,
-      comparative_cents INTEGER NOT NULL DEFAULT 0,
-      comparative_total_cents INTEGER NOT NULL DEFAULT 0,
-      comparative_serial INTEGER,
-      comparative_listed INTEGER NOT NULL DEFAULT 1 CHECK (comparative_listed IN (0, 1)),
-      demand_no TEXT,
-      ncbd_cents INTEGER NOT NULL DEFAULT 0,
-      ncbd_total_cents INTEGER NOT NULL DEFAULT 0,
-      sale_mode TEXT NOT NULL DEFAULT 'unit' CHECK (sale_mode IN ('unit','pieces')),
-      packet_comparative_cents INTEGER,
-      packet_ncbd_cents INTEGER,
-      pcs_per_packet_milli INTEGER,
-      pcs_sold_milli INTEGER,
-      entry_kind TEXT NOT NULL DEFAULT 'normal' CHECK (entry_kind IN ('normal','cash_alternate')),
-      notes TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE IF NOT EXISTS ct_payments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      contract_id INTEGER NOT NULL REFERENCES ct_contracts(id) ON DELETE CASCADE,
-      amount_cents INTEGER NOT NULL,
-      iso_date TEXT NOT NULL,
-      notes TEXT,
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE INDEX IF NOT EXISTS idx_ct_contracts_office ON ct_contracts(office_name COLLATE NOCASE);
-    CREATE INDEX IF NOT EXISTS idx_ct_boq_contract ON ct_boq_items(contract_id);
-    CREATE INDEX IF NOT EXISTS idx_ct_invoices_contract ON ct_invoices(contract_id);
-    CREATE INDEX IF NOT EXISTS idx_ct_entries_invoice ON ct_supply_entries(invoice_id);
-    CREATE INDEX IF NOT EXISTS idx_ct_payments_contract ON ct_payments(contract_id);
-
-    CREATE INDEX IF NOT EXISTS idx_batches_name ON batches(name COLLATE NOCASE);
-    CREATE INDEX IF NOT EXISTS idx_batches_category ON batches(category);
-    CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name COLLATE NOCASE);
-    CREATE INDEX IF NOT EXISTS idx_invoices_iso_date ON invoices(iso_date);
-    CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id);
-    CREATE INDEX IF NOT EXISTS idx_receipts_iso_date ON receipts(iso_date);
-    CREATE INDEX IF NOT EXISTS idx_cash_entries_iso_date ON cash_book_entries(iso_date);
-    CREATE INDEX IF NOT EXISTS idx_payables_party ON payables(party_name COLLATE NOCASE);
-  `);
-
-  // Drop legacy v1 tables if present (empty / disposable catalog)
+async function migrateLocal(db: DatabaseSync) {
+  db.exec(SCHEMA_SQL);
   const legacy = ["sale_items", "stock_movements", "sales", "products"] as const;
   for (const table of legacy) {
     try {
@@ -406,7 +54,6 @@ function migrate(db: DatabaseSync) {
     }
   }
 
-  // Ensure settings columns for upgraded DBs
   const cols = db.prepare("PRAGMA table_info(settings)").all() as { name: string }[];
   const names = new Set(cols.map((c) => c.name));
   const addCol = (name: string, ddl: string) => {
@@ -421,7 +68,6 @@ function migrate(db: DatabaseSync) {
   );
   addCol("operator_name", "operator_name TEXT NOT NULL DEFAULT ''");
 
-  // Seed Walk-in
   const walkIn = db.prepare("SELECT id FROM customers WHERE id = 1").get() as { id: number } | undefined;
   if (!walkIn) {
     const when = new Date().toISOString();
@@ -431,7 +77,6 @@ function migrate(db: DatabaseSync) {
     ).run(when, when);
   }
 
-  // Seed default operators if empty
   const opCount = db.prepare("SELECT COUNT(*) AS n FROM operators").get() as { n: number };
   if (Number(opCount.n) === 0) {
     const when = new Date().toISOString();
@@ -441,46 +86,166 @@ function migrate(db: DatabaseSync) {
   }
 }
 
-export async function getDb() {
-  await connection();
-  if (!globalForDb.posDb) {
-    const dir = path.join(process.cwd(), "data");
-    fs.mkdirSync(dir, { recursive: true });
-    const db = new DatabaseSync(path.join(dir, "pos.sqlite"));
-    db.exec("PRAGMA foreign_keys = ON");
-    db.exec("PRAGMA busy_timeout = 5000");
-    db.prepare("PRAGMA journal_mode = WAL").get();
-    migrate(db);
-    globalForDb.posDb = db;
+async function migrateTurso(client: Client) {
+  for (const stmt of splitStatements(SCHEMA_SQL)) {
+    await client.execute(stmt);
   }
-  return globalForDb.posDb;
+  for (const table of ["sale_items", "stock_movements", "sales", "products"]) {
+    try {
+      await client.execute(`DROP TABLE IF EXISTS ${table}`);
+    } catch {
+      // ignore
+    }
+  }
+
+  const cols = await client.execute("PRAGMA table_info(settings)");
+  const names = new Set(cols.rows.map((r) => String(r.name)));
+  const addCol = async (name: string, ddl: string) => {
+    if (!names.has(name)) await client.execute(`ALTER TABLE settings ADD COLUMN ${ddl}`);
+  };
+  await addCol("address", "address TEXT NOT NULL DEFAULT ''");
+  await addCol("phone", "phone TEXT NOT NULL DEFAULT ''");
+  await addCol("low_stock_threshold", "low_stock_threshold INTEGER NOT NULL DEFAULT 10");
+  await addCol(
+    "print_terms",
+    "print_terms TEXT NOT NULL DEFAULT 'Goods once sold are not returnable unless defective.'",
+  );
+  await addCol("operator_name", "operator_name TEXT NOT NULL DEFAULT ''");
+
+  const walkIn = await client.execute("SELECT id FROM customers WHERE id = 1");
+  if (!walkIn.rows.length) {
+    const when = new Date().toISOString();
+    await client.execute({
+      sql: `INSERT INTO customers (id, name, phone, type, balance_cents, opening_dues_cents, balance_manual, active, created_at, updated_at)
+            VALUES (1, 'Walk-in Customer', 'N/A', 'Regular', 0, 0, 0, 1, ?, ?)`,
+      args: [when, when],
+    });
+  }
+
+  const opCount = await client.execute("SELECT COUNT(*) AS n FROM operators");
+  if (Number(opCount.rows[0]?.n || 0) === 0) {
+    const when = new Date().toISOString();
+    for (const name of ["M. Akif", "Sohaib Alam"]) {
+      await client.execute({
+        sql: "INSERT INTO operators (name, active, created_at) VALUES (?, 1, ?)",
+        args: [name, when],
+      });
+    }
+  }
 }
 
-export function withTransaction<T>(db: DatabaseSync, fn: () => T) {
-  db.exec("BEGIN IMMEDIATE");
+function openLocalDb() {
+  const dir = path.join(process.cwd(), "data");
+  fs.mkdirSync(dir, { recursive: true });
+  const db = new DatabaseSync(path.join(dir, "pos.sqlite"));
+  db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
   try {
-    const result = fn();
-    db.exec("COMMIT");
+    db.prepare("PRAGMA journal_mode = WAL").get();
+  } catch {
+    // ignore on hosts that reject WAL
+  }
+  return db;
+}
+
+export async function getDb(): Promise<PosDb> {
+  await connection();
+
+  if (globalForDb.posDb) return globalForDb.posDb;
+
+  if (tursoConfigured()) {
+    const client = createClient({
+      url: process.env.TURSO_DATABASE_URL!,
+      authToken: process.env.TURSO_AUTH_TOKEN,
+    });
+    const handle: TursoHandle = { kind: "turso", client };
+    if (!globalForDb.posDbMigrated) {
+      await migrateTurso(client);
+      globalForDb.posDbMigrated = true;
+    }
+    globalForDb.posDb = handle;
+    return handle;
+  }
+
+  if (process.env.NETLIFY === "true") {
+    throw new Error(
+      "This POS needs a durable database on Netlify. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in the Netlify env settings, then redeploy.",
+    );
+  }
+
+  const db = openLocalDb();
+  await migrateLocal(db);
+  const handle: LocalHandle = { kind: "local", db };
+  globalForDb.posDb = handle;
+  return handle;
+}
+
+export async function run(db: PosDb, sql: string, params: SqlValue[] = []) {
+  if (db.kind === "local") {
+    const result = db.db.prepare(sql).run(...(params as (string | number | null | bigint)[]));
+    return { changes: Number(result.changes), id: Number(result.lastInsertRowid) };
+  }
+  const result = await tursoExecute(db.client, sql, params);
+  return {
+    changes: Number(result.rowsAffected ?? 0),
+    id: Number(result.lastInsertRowid ?? 0),
+  };
+}
+
+export async function getRow<T>(db: PosDb, sql: string, params: SqlValue[] = []) {
+  if (db.kind === "local") {
+    return db.db.prepare(sql).get(...(params as (string | number | null | bigint)[])) as T | undefined;
+  }
+  const result = await tursoExecute(db.client, sql, params);
+  return (result.rows[0] as T | undefined) ?? undefined;
+}
+
+export async function allRows<T>(db: PosDb, sql: string, params: SqlValue[] = []) {
+  if (db.kind === "local") {
+    return db.db.prepare(sql).all(...(params as (string | number | null | bigint)[])) as T[];
+  }
+  const result = await tursoExecute(db.client, sql, params);
+  return result.rows as T[];
+}
+
+export async function execSql(db: PosDb, sql: string) {
+  if (db.kind === "local") {
+    db.db.exec(sql);
+    return;
+  }
+  for (const stmt of splitStatements(sql)) {
+    await tursoExecute(db.client, stmt);
+  }
+}
+
+export async function withTransaction<T>(db: PosDb, fn: () => Promise<T> | T): Promise<T> {
+  if (db.kind === "local") {
+    db.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = await fn();
+      db.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        db.db.exec("ROLLBACK");
+      } catch {
+        // keep original
+      }
+      throw error;
+    }
+  }
+
+  const tx = await db.client.transaction("write");
+  try {
+    const result = await tursoTx.run(tx, async () => await fn());
+    await tx.commit();
     return result;
   } catch (error) {
     try {
-      db.exec("ROLLBACK");
+      await tx.rollback();
     } catch {
       // keep original
     }
     throw error;
   }
-}
-
-export function run(db: DatabaseSync, sql: string, params: SqlValue[] = []) {
-  const result = db.prepare(sql).run(...params);
-  return { changes: Number(result.changes), id: Number(result.lastInsertRowid) };
-}
-
-export function getRow<T>(db: DatabaseSync, sql: string, params: SqlValue[] = []) {
-  return db.prepare(sql).get(...params) as T | undefined;
-}
-
-export function allRows<T>(db: DatabaseSync, sql: string, params: SqlValue[] = []) {
-  return db.prepare(sql).all(...params) as T[];
 }

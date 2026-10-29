@@ -10,7 +10,7 @@ import { inRange } from "@/lib/period";
 
 export async function getOpening(periodKey: string) {
   const db = await getDb();
-  const row = getRow<{ amount_cents: number }>(
+  const row = await getRow<{ amount_cents: number }>(
     db,
     "SELECT amount_cents FROM cash_book_openings WHERE period_key=?",
     [periodKey],
@@ -21,17 +21,17 @@ export async function getOpening(periodKey: string) {
 export async function setOpening(periodKey: string, amountCents: number) {
   const db = await getDb();
   const when = nowIso();
-  const existing = getRow<{ period_key: string }>(db, "SELECT period_key FROM cash_book_openings WHERE period_key=?", [
+  const existing = await getRow<{ period_key: string }>(db, "SELECT period_key FROM cash_book_openings WHERE period_key=?", [
     periodKey,
   ]);
   if (existing) {
-    run(db, "UPDATE cash_book_openings SET amount_cents=?, updated_at=? WHERE period_key=?", [
+    await run(db, "UPDATE cash_book_openings SET amount_cents=?, updated_at=? WHERE period_key=?", [
       roundCents(amountCents),
       when,
       periodKey,
     ]);
   } else {
-    run(db, "INSERT INTO cash_book_openings (period_key, amount_cents, updated_at) VALUES (?,?,?)", [
+    await run(db, "INSERT INTO cash_book_openings (period_key, amount_cents, updated_at) VALUES (?,?,?)", [
       periodKey,
       roundCents(amountCents),
       when,
@@ -41,12 +41,12 @@ export async function setOpening(periodKey: string, amountCents: number) {
 
 export async function clearOpening(periodKey: string) {
   const db = await getDb();
-  run(db, "DELETE FROM cash_book_openings WHERE period_key=?", [periodKey]);
+  await run(db, "DELETE FROM cash_book_openings WHERE period_key=?", [periodKey]);
 }
 
 export async function listCashEntries(from: string | null, to: string | null, type?: string) {
   const db = await getDb();
-  let rows = allRows<{
+  let rows = await allRows<{
     id: number;
     iso_date: string;
     type: CashEntryType;
@@ -92,7 +92,7 @@ export async function addCashEntry(input: {
   const amount = roundCents(input.amountCents);
   if (amount <= 0) throw new ActionError("Enter an amount.");
   if (!input.description.trim() && !input.auto) throw new ActionError("Description is required.");
-  return run(
+  return (await run(
     db,
     `INSERT INTO cash_book_entries (iso_date, type, amount_cents, description, seller, bill_no, rent_month, auto, payable_id, purchase_id, arrival_id, operator_name, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -111,7 +111,7 @@ export async function addCashEntry(input: {
       input.operatorName,
       nowIso(),
     ],
-  ).id;
+  )).id;
 }
 
 export async function updateCashEntry(
@@ -125,7 +125,7 @@ export async function updateCashEntry(
   },
 ) {
   const db = await getDb();
-  const updated = run(
+  const updated = await run(
     db,
     `UPDATE cash_book_entries SET type=?, amount_cents=?, description=?, iso_date=?, rent_month=? WHERE id=?`,
     [input.type, roundCents(input.amountCents), input.description, input.isoDate, input.rentMonth || null, id],
@@ -135,9 +135,9 @@ export async function updateCashEntry(
 
 export async function deleteCashEntry(id: number) {
   const db = await getDb();
-  const row = getRow<Record<string, unknown>>(db, "SELECT * FROM cash_book_entries WHERE id=?", [id]);
+  const row = await getRow<Record<string, unknown>>(db, "SELECT * FROM cash_book_entries WHERE id=?", [id]);
   if (!row) throw new ActionError("Cash entry not found.");
-  run(db, "DELETE FROM cash_book_entries WHERE id=?", [id]);
+  await run(db, "DELETE FROM cash_book_entries WHERE id=?", [id]);
   return row;
 }
 
@@ -147,10 +147,12 @@ export async function computeCashBook(from: string | null, to: string | null) {
   const entries = await listCashEntries(from, to);
 
   // Auto inflows: paid at sale + receipts in period
-  const invPaid = allRows<{ paid_cents: number; iso_date: string }>(db, "SELECT paid_cents, iso_date FROM invoices")
+  const invPaid = (await allRows<{ paid_cents: number; iso_date: string }>(db, "SELECT paid_cents, iso_date FROM invoices"))
     .filter((i) => inRange(i.iso_date, from, to))
     .reduce((s, i) => s + Number(i.paid_cents), 0);
-  const receipts = allRows<{ amount_cents: number; iso_date: string }>(db, "SELECT amount_cents, iso_date FROM receipts")
+  const receipts = (
+    await allRows<{ amount_cents: number; iso_date: string }>(db, "SELECT amount_cents, iso_date FROM receipts")
+  )
     .filter((r) => inRange(r.iso_date, from, to))
     .reduce((s, r) => s + Number(r.amount_cents), 0);
 

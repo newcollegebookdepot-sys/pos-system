@@ -3,6 +3,8 @@ import { Shell } from "@/components/shell";
 import { requireUser } from "@/lib/auth";
 import { readSettings } from "@/lib/repo/settings";
 
+export const dynamic = "force-dynamic";
+
 export default async function CounterLayout({ children }: { children: React.ReactNode }) {
   const settings = await readSettings();
   if (!settings) redirect("/setup");

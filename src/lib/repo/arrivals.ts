@@ -7,7 +7,7 @@ import { roundCents } from "@/lib/money";
 
 export async function listArrivals() {
   const db = await getDb();
-  const rows = allRows<{
+  const rows = await allRows<{
     id: number;
     seller_name: string;
     bill_t_no: string | null;
@@ -46,10 +46,10 @@ export async function createAdvance(input: {
   const amount = roundCents(input.advanceCents);
   if (amount <= 0) throw new ActionError("Enter advance amount.");
   const db = await getDb();
-  return withTransaction(db, () => {
+  return await withTransaction(db, async () => {
     const when = nowIso();
     const iso = input.isoDate || when.slice(0, 10);
-    const cashId = run(
+    const cashId = (await run(
       db,
       `INSERT INTO cash_book_entries (iso_date, type, amount_cents, description, seller, bill_no, rent_month, auto, payable_id, purchase_id, arrival_id, operator_name, created_at)
        VALUES (?,?,?,?,?,?,NULL,1,NULL,NULL,NULL,?,?)`,
@@ -63,8 +63,8 @@ export async function createAdvance(input: {
         input.operatorName,
         when,
       ],
-    ).id;
-    const id = run(
+    )).id;
+    const id = (await run(
       db,
       `INSERT INTO arrivals (seller_name, bill_t_no, advance_cents, bill_t_amount_cents, bill_t_paid_cents, status, advance_date, reached_date, note, advance_cash_id, operator_name, created_at)
        VALUES (?,?,?,0,0,'pending',?,NULL,?,?,?,?)`,
@@ -78,8 +78,8 @@ export async function createAdvance(input: {
         input.operatorName,
         when,
       ],
-    ).id;
-    run(db, "UPDATE cash_book_entries SET arrival_id=? WHERE id=?", [id, cashId]);
+    )).id;
+    await run(db, "UPDATE cash_book_entries SET arrival_id=? WHERE id=?", [id, cashId]);
     return id;
   });
 }
@@ -91,13 +91,13 @@ export async function markReached(input: {
   reachedDate: string;
 }) {
   const db = await getDb();
-  const a = getRow<{ status: string }>(db, "SELECT status FROM arrivals WHERE id=?", [input.id]);
+  const a = await getRow<{ status: string }>(db, "SELECT status FROM arrivals WHERE id=?", [input.id]);
   if (!a) throw new ActionError("Arrival not found.");
   if (a.status === "completed") throw new ActionError("Already completed.");
   const amt = roundCents(input.billTAmountCents);
   if (amt <= 0) throw new ActionError("Enter Bill T amount.");
   if (!input.billTNo.trim()) throw new ActionError("Bill T # is required.");
-  run(
+  await run(
     db,
     `UPDATE arrivals SET bill_t_no=?, bill_t_amount_cents=?, status='reached', reached_date=? WHERE id=?`,
     [input.billTNo.trim(), amt, input.reachedDate, input.id],
@@ -111,8 +111,8 @@ export async function payBillT(input: {
   isoDate?: string;
 }) {
   const db = await getDb();
-  return withTransaction(db, () => {
-    const a = getRow<{
+  return await withTransaction(db, async () => {
+    const a = await getRow<{
       id: number;
       status: string;
       bill_t_amount_cents: number;
@@ -127,7 +127,7 @@ export async function payBillT(input: {
     if (amount <= 0) throw new ActionError("Nothing left to pay.");
     const when = nowIso();
     const iso = input.isoDate || when.slice(0, 10);
-    run(
+    await run(
       db,
       `INSERT INTO cash_book_entries (iso_date, type, amount_cents, description, seller, bill_no, rent_month, auto, payable_id, purchase_id, arrival_id, operator_name, created_at)
        VALUES (?,?,?,?,?,?,NULL,1,NULL,NULL,?,?,?)`,
@@ -145,16 +145,16 @@ export async function payBillT(input: {
     );
     const paid = Number(a.bill_t_paid_cents) + amount;
     const status = paid >= Number(a.bill_t_amount_cents) ? "completed" : "reached";
-    run(db, "UPDATE arrivals SET bill_t_paid_cents=?, status=? WHERE id=?", [paid, status, a.id]);
+    await run(db, "UPDATE arrivals SET bill_t_paid_cents=?, status=? WHERE id=?", [paid, status, a.id]);
     return { paid, status, remaining: Number(a.bill_t_amount_cents) - paid };
   });
 }
 
 export async function deleteArrival(id: number) {
   const db = await getDb();
-  const row = getRow<Record<string, unknown>>(db, "SELECT * FROM arrivals WHERE id=?", [id]);
+  const row = await getRow<Record<string, unknown>>(db, "SELECT * FROM arrivals WHERE id=?", [id]);
   if (!row) throw new ActionError("Arrival not found.");
-  run(db, "DELETE FROM arrivals WHERE id=?", [id]);
+  await run(db, "DELETE FROM arrivals WHERE id=?", [id]);
   return row;
 }
 

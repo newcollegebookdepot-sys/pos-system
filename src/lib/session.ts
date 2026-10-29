@@ -12,6 +12,19 @@ let cachedSecret: string | null = null;
 
 function sessionSecret() {
   if (cachedSecret) return cachedSecret;
+
+  const fromEnv = process.env.SESSION_SECRET?.trim();
+  if (fromEnv) {
+    cachedSecret = fromEnv;
+    return cachedSecret;
+  }
+
+  if (process.env.NETLIFY === "true") {
+    throw new Error(
+      "SESSION_SECRET is required on Netlify. Set a long random value in Site settings → Environment variables.",
+    );
+  }
+
   const file = path.join(process.cwd(), "data", "session.secret");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (!fs.existsSync(file)) {
@@ -43,6 +56,7 @@ export async function setSession(userId: number) {
     sameSite: "lax",
     path: "/",
     expires: new Date(exp),
+    secure: process.env.NODE_ENV === "production",
   });
 }
 

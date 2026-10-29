@@ -9,7 +9,7 @@ import { inRange } from "@/lib/period";
 
 export async function listReceipts(opts: { from: string | null; to: string | null; q?: string; mode?: string }) {
   const db = await getDb();
-  let rows = allRows<{
+  let rows = await allRows<{
     id: number;
     receipt_number: string;
     customer_id: number;
@@ -55,8 +55,8 @@ export async function createReceipt(input: {
 }) {
   if (input.customerId === WALK_IN_ID) throw new ActionError("Walk-in does not use cash receipts.");
   const db = await getDb();
-  return withTransaction(db, () => {
-    const c = getRow<{ id: number; name: string; balance_cents: number }>(
+  return await withTransaction(db, async () => {
+    const c = await getRow<{ id: number; name: string; balance_cents: number }>(
       db,
       "SELECT id, name, balance_cents FROM customers WHERE id=?",
       [input.customerId],
@@ -69,23 +69,23 @@ export async function createReceipt(input: {
     // over-receipt creates surplus for registered customers
     const when = nowIso();
     const iso = input.isoDate || when.slice(0, 10);
-    const count = getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM receipts");
+    const count = await getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM receipts");
     const receiptNumber = `RCP-${1000 + Number(count?.n || 0) + 1}`;
-    run(
+    await run(
       db,
       `INSERT INTO receipts (receipt_number, customer_id, customer_name, amount_cents, mode, prev_balance_cents, new_balance_cents, operator_name, iso_date, note, created_at)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       [receiptNumber, c.id, c.name, amount, input.mode, prev, next, input.operatorName, iso, input.note || null, when],
     );
-    run(db, "UPDATE customers SET balance_cents=?, updated_at=? WHERE id=?", [next, when, c.id]);
+    await run(db, "UPDATE customers SET balance_cents=?, updated_at=? WHERE id=?", [next, when, c.id]);
     return receiptNumber;
   });
 }
 
 export async function deleteReceipt(id: number) {
   const db = await getDb();
-  return withTransaction(db, () => {
-    const r = getRow<{
+  return await withTransaction(db, async () => {
+    const r = await getRow<{
       id: number;
       customer_id: number;
       amount_cents: number;
@@ -99,14 +99,14 @@ export async function deleteReceipt(id: number) {
       note: string | null;
     }>(db, "SELECT * FROM receipts WHERE id=?", [id]);
     if (!r) throw new ActionError("Receipt not found.");
-    const c = getRow<{ balance_cents: number }>(db, "SELECT balance_cents FROM customers WHERE id=?", [
+    const c = await getRow<{ balance_cents: number }>(db, "SELECT balance_cents FROM customers WHERE id=?", [
       r.customer_id,
     ]);
     if (c) {
       const next = Number(c.balance_cents) + Number(r.amount_cents);
-      run(db, "UPDATE customers SET balance_cents=?, updated_at=? WHERE id=?", [next, nowIso(), r.customer_id]);
+      await run(db, "UPDATE customers SET balance_cents=?, updated_at=? WHERE id=?", [next, nowIso(), r.customer_id]);
     }
-    run(db, "DELETE FROM receipts WHERE id=?", [id]);
+    await run(db, "DELETE FROM receipts WHERE id=?", [id]);
     return r;
   });
 }
