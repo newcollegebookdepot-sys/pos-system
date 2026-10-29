@@ -1,0 +1,240 @@
+@import "tailwindcss";
+@import "../styles/pro-core.css";
+@import "../styles/contracts-module.css";
+
+/* Map app utility tokens → PRO dark palette so existing Tailwind classes flip with the theme */
+@theme {
+  --font-sans: "Segoe UI", system-ui, sans-serif;
+  --font-serif: "Segoe UI", system-ui, sans-serif;
+  --color-paper: #080d1a;
+  --color-ink: #f8fafc;
+  --color-stamp: #f43f5e;
+  --color-forest: #38bdf8;
+  --color-forest-dark: #0ea5e9;
+  --color-line: rgba(56, 189, 248, 0.22);
+  --color-card: rgba(15, 23, 42, 0.82);
+}
+
+/* Bridge: inputs use class "field" directly in this app */
+input.field,
+select.field,
+textarea.field {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--input);
+  color: var(--text) !important;
+  -webkit-text-fill-color: var(--text) !important;
+  caret-color: var(--cyan);
+  font-size: 13px;
+  outline: none;
+}
+input.field:focus,
+select.field:focus,
+textarea.field:focus {
+  border-color: var(--cyan);
+  box-shadow: var(--glow);
+}
+input.field::placeholder {
+  color: var(--muted);
+  -webkit-text-fill-color: var(--muted);
+}
+
+/* Soften Tailwind bg-white / text-black leftovers on dark UI */
+.bg-white {
+  background-color: rgba(15, 23, 42, 0.95) !important;
+}
+.hover\:bg-forest\/5:hover {
+  background-color: rgba(56, 189, 248, 0.08) !important;
+}
+.hover\:bg-ink\/5:hover {
+  background-color: rgba(148, 163, 184, 0.08) !important;
+}
+.ring-line {
+  --tw-ring-color: var(--border);
+}
+.text-stamp {
+  color: var(--red);
+}
+.text-forest {
+  color: var(--cyan);
+}
+
+/* App shell layout (sidebar already in pro-core) */
+.app-shell {
+  min-height: 100vh;
+}
+.app-shell .main {
+  margin-left: var(--side);
+  padding: 20px;
+  min-height: 100vh;
+}
+@media (max-width: 1100px) {
+  .app-shell .main {
+    margin-left: 0;
+  }
+}
+
+a.menu-link {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  display: block;
+  box-sizing: border-box;
+}
+a.menu-link:hover,
+a.menu-link.active {
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.15), rgba(168, 85, 247, 0.15));
+  color: var(--cyan);
+  border-color: var(--border);
+  box-shadow: var(--glow);
+}
+
+a.menu-link.module-portal {
+  margin-bottom: 4px;
+  border-color: rgba(212, 168, 83, 0.35);
+  color: #e2c078;
+  background: rgba(212, 168, 83, 0.08);
+  text-align: center;
+}
+a.menu-link.module-portal:hover {
+  color: #1a1408;
+  background: linear-gradient(135deg, #e2c078, #d4a853);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.qa-tile {
+  text-decoration: none;
+}
+.qa-tile .qa-title {
+  color: inherit;
+}
+
+.topbar h1 {
+  margin: 0;
+}
+
+.ac-list.open {
+  display: block;
+}
+
+.toast-stack {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(320px, calc(100vw - 24px));
+  pointer-events: none;
+}
+.toast-item {
+  pointer-events: auto;
+  border-radius: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: var(--glow);
+  color: var(--text);
+}
+.toast-item.success {
+  border-color: rgba(34, 197, 94, 0.45);
+}
+.toast-item.error {
+  border-color: rgba(244, 63, 94, 0.45);
+}
+.toast-item.warning {
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.login-card {
+  width: min(420px, 100%);
+}
+
+.btn-ghost {
+  background: rgba(30, 41, 59, 0.88);
+  color: var(--text);
+  border-color: rgba(56, 189, 248, 0.28);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: rgba(51, 65, 85, 0.95);
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #fff;
+}
+.btn-header {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-header:hover {
+  color: var(--cyan);
+  border-color: var(--border);
+}
+
+.user-chip {
+  text-align: right;
+  font-size: 12px;
+  line-height: 1.25;
+}
+.user-chip strong {
+  display: block;
+  color: var(--text);
+}
+.user-chip span {
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.35);
+  color: #fff;
+}
+
+@media print {
+  @page {
+    margin: 12mm;
+  }
+  body {
+    background: white !important;
+    color: #111 !important;
+  }
+  .sidebar,
+  .qa-bar,
+  .no-print {
+    display: none !important;
+  }
+  .app-shell .main {
+    margin-left: 0 !important;
+    padding: 0 !important;
+  }
+}
