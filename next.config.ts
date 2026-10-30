@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   agentRules: false,
-  // Bundle the seed SQLite for local/dev; production on Netlify uses Turso.
+  // Bundle the seed SQLite for local/dev; production on Vercel uses Turso.
   outputFileTracingIncludes: {
     "/**": ["./data/pos.sqlite"],
   },

@@ -222,9 +222,9 @@ export async function getDb(): Promise<PosDb> {
     return handle;
   }
 
-  if (process.env.NETLIFY === "true") {
+  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
     throw new Error(
-      "This POS needs a durable database on Netlify. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in the Netlify env settings, then redeploy.",
+      "This POS needs a durable database in production. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in the Vercel project env vars, then redeploy.",
     );
   }
 

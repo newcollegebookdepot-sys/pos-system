@@ -19,9 +19,9 @@ function sessionSecret() {
     return cachedSecret;
   }
 
-  if (process.env.NETLIFY === "true") {
+  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
     throw new Error(
-      "SESSION_SECRET is required on Netlify. Set a long random value in Site settings → Environment variables.",
+      "SESSION_SECRET is required in production. Set a long random value in the Vercel project Environment Variables.",
     );
   }
 

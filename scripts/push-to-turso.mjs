@@ -121,4 +121,4 @@ for (const table of TABLES) {
 
 local.close();
 remote.close();
-console.log("Done. Set the same TURSO_* vars on Netlify and redeploy.");
+console.log("Done. Set the same TURSO_* vars on Vercel and redeploy.");
