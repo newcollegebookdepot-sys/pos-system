@@ -7,9 +7,9 @@ import type { PublicUser, Settings } from "@/lib/types";
 
 const LINKS = [
   { href: "/contracts", label: "Overview", match: "exact" as const },
-  { href: "/contracts/list", label: "Offices & heads", match: "prefix" as const },
+  { href: "/contracts/list", label: "Offices", match: "prefix" as const },
   { href: "/contracts/invoices", label: "Invoices", match: "invoices" as const },
-  { href: "/contracts/invoices/new", label: "Compose invoice", match: "exact" as const },
+  { href: "/contracts/invoices/new", label: "Compose", match: "exact" as const },
   { href: "/contracts/firms", label: "Firms", match: "prefix" as const },
 ];
 
@@ -27,9 +27,8 @@ export function ContractsShell({
       <div className="ct-shell">
         <aside className="ct-sidebar no-print">
           <div className="ct-brand">
-            <p className="ct-brand-kicker">Module</p>
             <Link href="/contracts" className="ct-brand-title">
-              Office contracts
+              Contracts
             </Link>
             <p className="ct-brand-sub">{settings.shopName}</p>
           </div>
@@ -43,7 +42,7 @@ export function ContractsShell({
               <span>Manager</span>
             </div>
             <Link href="/dashboard" className="ct-back">
-              ← Back to retail POS
+              ← Retail POS
             </Link>
             <form action={logout}>
               <button className="btn btn-secondary btn-block btn-sm" type="submit">
@@ -53,15 +52,7 @@ export function ContractsShell({
           </div>
         </aside>
 
-        <div className="ct-main">
-          <header className="ct-module-bar no-print">
-            <div>
-              <p className="ct-module-kicker">Separate ledger · comparative billing</p>
-              <p className="ct-module-note">Does not touch retail stock or customer dues.</p>
-            </div>
-          </header>
-          {children}
-        </div>
+        <div className="ct-main">{children}</div>
       </div>
     </ToastProvider>
   );

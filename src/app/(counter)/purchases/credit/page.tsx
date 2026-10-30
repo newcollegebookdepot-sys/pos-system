@@ -9,7 +9,7 @@ export default async function CreditPurchasePage() {
   await requireManager();
   return (
     <div className="max-w-2xl">
-      <PageHeader title="Credit purchase" description="Stock in + seller payable. Same buy cost restocks the batch." />
+      <PageHeader title="Credit purchase" description="Stock in + seller payable." />
       <div className="card mt-4 p-5">
         <ActionForm action={creditPurchaseAction} successMessage="Completed">
           <input name="supplierName" className="field" placeholder="Seller name" required />

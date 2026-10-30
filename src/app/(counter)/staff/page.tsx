@@ -13,10 +13,7 @@ export default async function StaffPage() {
 
   return (
     <div className="grid gap-6">
-      <PageHeader
-        title="Staff"
-        description="Cashiers can sell. Managers can also change products, stock, staff, and reports."
-      />
+      <PageHeader title="Staff" description="Cashiers sell · managers manage stock, staff, and settings." />
 
       <section className="card max-w-xl p-5">
         <h2 className="font-serif text-2xl">Add a login</h2>

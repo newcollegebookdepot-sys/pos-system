@@ -16,10 +16,7 @@ export default async function NewContractInvoicePage({
 
   return (
     <div>
-      <PageHeader
-        title="New contract invoice"
-        description="Pick office/head, add BOQ lines, save as draft."
-      />
+      <PageHeader title="New invoice" />
       <ContractInvoiceComposer
         today={today}
         presetContractId={contract?.id}

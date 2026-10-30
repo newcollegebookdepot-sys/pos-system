@@ -17,12 +17,9 @@ export default async function LoginPage() {
       <div className="box login-card">
         <div className="shop-name" style={{ border: 0, marginBottom: 8, paddingBottom: 0 }}>
           {settings.shopName}
-          <span>PRO counter sign-in</span>
+          <span>Point of sale</span>
         </div>
-        <h1 style={{ fontSize: 22, fontWeight: 900, marginBottom: 6 }}>Sign in</h1>
-        <p className="muted" style={{ marginBottom: 16 }}>
-          Use the username a manager gave you.
-        </p>
+        <h1 style={{ fontSize: 22, fontWeight: 900, marginBottom: 16 }}>Sign in</h1>
         <ActionForm action={login}>
           <div>
             <label className="label" htmlFor="username">

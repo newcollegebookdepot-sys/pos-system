@@ -19,7 +19,7 @@ export default async function FirmsPage({
 
   return (
     <div className="grid gap-6">
-      <PageHeader title="Firms" description="Trading entities that hold office contracts." />
+      <PageHeader title="Firms" />
 
       <section className="box">
         <h2>{editing ? `Edit ${editing.name}` : "Register firm"}</h2>

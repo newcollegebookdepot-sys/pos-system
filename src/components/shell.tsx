@@ -23,16 +23,16 @@ export async function Shell({
     user.role === "manager"
       ? [
           { href: "/dashboard", label: "Dashboard" },
-          { href: "/sell", label: "New sale" },
-          { href: "/invoices", label: "Invoices & returns" },
-          { href: "/stock", label: "Stock & batches" },
-          { href: "/customers", label: "Customers & ledger" },
-          { href: "/cash", label: "Cash book & expenses" },
+          { href: "/sell", label: "Sell" },
+          { href: "/invoices", label: "Invoices" },
+          { href: "/stock", label: "Stock" },
+          { href: "/customers", label: "Customers" },
+          { href: "/cash", label: "Cash" },
           { href: "/analytics", label: "Analytics" },
-          { href: "/settings", label: "Backup / settings" },
+          { href: "/settings", label: "Settings" },
         ]
       : [
-          { href: "/sell", label: "New sale" },
+          { href: "/sell", label: "Sell" },
           { href: "/invoices", label: "Invoices" },
         ];
 
@@ -64,7 +64,7 @@ export async function Shell({
           <div className="sidebar-foot">
             {user.role === "manager" ? (
               <Link href="/contracts" className="menu-link module-portal">
-                Office contracts module
+                Contracts
               </Link>
             ) : null}
             <LiveClock />
@@ -74,7 +74,7 @@ export async function Shell({
             </div>
             {user.role === "manager" ? (
               <Link href="/staff" className="menu-link" style={{ textAlign: "center" }}>
-                Staff accounts
+                Staff
               </Link>
             ) : null}
             <form action={logout}>
@@ -90,23 +90,23 @@ export async function Shell({
             <div className="qa-bar no-print">
               <Link href="/sell" className="qa-tile qa-sale">
                 <span className="qa-kicker">POS</span>
-                <span className="qa-title">New sale</span>
+                <span className="qa-title">Sell</span>
               </Link>
               <Link href="/customers?receipt=1" className="qa-tile qa-rcp">
                 <span className="qa-kicker">Ledger</span>
-                <span className="qa-title">Cash receipt</span>
+                <span className="qa-title">Receipt</span>
               </Link>
               <Link href="/stock?search=1" className="qa-tile qa-search">
-                <span className="qa-kicker">Catalog</span>
-                <span className="qa-title">Search product</span>
+                <span className="qa-kicker">Stock</span>
+                <span className="qa-title">Find item</span>
               </Link>
               <Link href="/purchases/bulk" className="qa-tile qa-bulk">
-                <span className="qa-kicker">Purchase</span>
-                <span className="qa-title">Bulk purchase</span>
+                <span className="qa-kicker">Buy</span>
+                <span className="qa-title">Bulk in</span>
               </Link>
               <Link href="/sell?drafts=1" className={`qa-tile qa-drafts${drafts ? " has-drafts" : ""}`}>
                 <span className="qa-kicker">Parked</span>
-                <span className="qa-title">Sale drafts</span>
+                <span className="qa-title">Drafts</span>
                 {drafts ? <span className="qa-draft-count">{drafts}</span> : null}
               </Link>
             </div>
@@ -114,11 +114,11 @@ export async function Shell({
             <div className="qa-bar no-print" style={{ gridTemplateColumns: "repeat(2,minmax(0,1fr))" }}>
               <Link href="/sell" className="qa-tile qa-sale">
                 <span className="qa-kicker">POS</span>
-                <span className="qa-title">New sale</span>
+                <span className="qa-title">Sell</span>
               </Link>
               <Link href="/sell?drafts=1" className={`qa-tile qa-drafts${drafts ? " has-drafts" : ""}`}>
                 <span className="qa-kicker">Parked</span>
-                <span className="qa-title">Sale drafts</span>
+                <span className="qa-title">Drafts</span>
                 {drafts ? <span className="qa-draft-count">{drafts}</span> : null}
               </Link>
             </div>

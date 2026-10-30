@@ -497,22 +497,18 @@ export function ContractInvoiceComposer({
               value={entryKind}
               onChange={(e) => changeEntryKind(e.target.value as CtEntryKind)}
             >
-              <option value="normal">Normal (counts to head)</option>
+              <option value="normal">Normal</option>
               <option value="cash_alternate">Cash alternate</option>
             </select>
           </div>
-          <p className="muted" style={{ flexBasis: "100%", marginTop: 4 }}>
-            On each line set <strong>Bill qty</strong>, then <strong>Cash alt</strong> (rest is picked). Enter{" "}
-            <strong>Cash taken</strong> for the cash portion (e.g. bill 10, pick 5, cash alt 5 + Rs 10,000).
-          </p>
           {entryKind === "cash_alternate" ? (
             <div>
-              <label className="label">Invoice cash taken (optional override)</label>
+              <label className="label">Invoice cash taken</label>
               <input
                 className="field"
                 value={cashTaken}
                 onChange={(e) => setCashTaken(e.target.value)}
-                placeholder="sum of line cash, or more"
+                placeholder="Total cash (optional)"
               />
             </div>
           ) : null}

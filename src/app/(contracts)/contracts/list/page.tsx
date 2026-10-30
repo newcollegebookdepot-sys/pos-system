@@ -24,10 +24,7 @@ export default async function ContractsListPage() {
 
   return (
     <div className="grid gap-6">
-      <PageHeader
-        title="Offices & heads"
-        description="Each contract is an office name plus a contract head under one firm."
-      />
+      <PageHeader title="Offices" />
 
       <section className="box">
         <h2>New contract</h2>

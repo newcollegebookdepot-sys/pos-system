@@ -9,10 +9,7 @@ export default async function BulkPurchasePage() {
   await requireManager();
   return (
     <div className="max-w-2xl">
-      <PageHeader
-        title="Bulk purchase + freight"
-        description="Creates stock batches and supplier/freight payables. Does not post cash — pay later from Cash book."
-      />
+      <PageHeader title="Bulk purchase" description="Adds stock and payables. Pay later from Cash." />
       <div className="card mt-4 p-5">
         <ActionForm
           action={bulkPurchaseAction}

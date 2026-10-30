@@ -59,7 +59,7 @@ export default async function CustomersPage({
 
   return (
     <div className="grid gap-6">
-      <PageHeader title="Customers & ledger" description="Walk-in is always first. Balance > 0 = dues, < 0 = surplus." />
+      <PageHeader title="Customers" description="Balance over 0 = dues · under 0 = surplus" />
       <Suspense>
         <PeriodBar />
       </Suspense>

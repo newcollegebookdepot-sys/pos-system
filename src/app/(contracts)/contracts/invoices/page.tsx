@@ -22,7 +22,6 @@ export default async function ContractInvoicesPage({
       <div>
         <PageHeader
           title="Invoices"
-          description="Pick an office to view and manage its comparative invoices."
           actions={
             <Link href="/contracts/invoices/new" className="btn btn-primary">
               Compose
@@ -30,7 +29,7 @@ export default async function ContractInvoicesPage({
           }
         />
         <section className="box">
-          <h2>Offices</h2>
+          <h2>Choose office</h2>
           <ContractOfficesFilter offices={offices} />
         </section>
       </div>
@@ -38,22 +37,17 @@ export default async function ContractInvoicesPage({
   }
 
   const invoices = await listCtInvoices({ officeName: office, status });
-  const statusQs = status ? `&status=${status}` : "";
 
   return (
     <div>
       <PageHeader
         title={office}
-        description="Edit lines, mark billed/unbilled, track picked vs cash-alternate."
         actions={
           <div className="flex flex-wrap gap-2">
             <Link href="/contracts/invoices" className="btn btn-secondary">
-              All offices
+              Offices
             </Link>
-            <Link
-              href={`/contracts/invoices/new`}
-              className="btn btn-primary"
-            >
+            <Link href="/contracts/invoices/new" className="btn btn-primary">
               Compose
             </Link>
           </div>
@@ -128,8 +122,8 @@ export default async function ContractInvoicesPage({
           </table>
           {invoices.length === 0 ? (
             <p className="muted">
-              No invoices{status ? ` (${status})` : ""}.{statusQs ? "" : ""}{" "}
-              <Link href="/contracts/invoices/new">Compose one</Link>.
+              No invoices{status ? ` (${status})` : ""}.{" "}
+              <Link href="/contracts/invoices/new">Compose</Link>
             </p>
           ) : null}
         </div>

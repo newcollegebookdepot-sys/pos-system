@@ -31,11 +31,11 @@ export default async function BoqPage({
   return (
     <div className="grid gap-6">
       <PageHeader
-        title={`BOQ · ${contract.officeName}`}
-        description={`${contract.contractHead} · comparative (bill) vs NCBD (cost)`}
+        title="BOQ"
+        description={`${contract.officeName} · ${contract.contractHead}`}
         actions={
           <Link href={`/contracts/${id}`} className="btn btn-secondary">
-            Back to board
+            Board
           </Link>
         }
       />
@@ -108,9 +108,7 @@ export default async function BoqPage({
 
       <section className="box">
         <h2>CSV import</h2>
-        <p className="muted mb-2">
-          Columns: serial, item name, unit, comparative, ncbd (optional listed 0/1).
-        </p>
+        <p className="muted mb-2">serial, name, unit, comparative, ncbd</p>
         <ActionForm action={uploadBoqCsv} successMessage="Imported">
           <input type="hidden" name="contractId" value={id} />
           <input type="file" name="file" accept=".csv,text/csv" required className="field" />

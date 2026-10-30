@@ -19,7 +19,7 @@ export default async function SettingsPage() {
 
   return (
     <div className="grid max-w-2xl gap-6">
-      <PageHeader title="Backup & settings" description="Shop profile, operators, backup/restore, and danger ops." />
+      <PageHeader title="Settings" />
       <div className="card p-5">
         <ActionForm action={saveShopSettings} successMessage="Saved">
           <label className="label" htmlFor="shopName">
@@ -73,7 +73,9 @@ export default async function SettingsPage() {
 
       <div className="card p-5">
         <h2 className="font-serif text-2xl text-stamp">Danger</h2>
-        <p className="mt-2 text-sm text-ink/70">Keeps logins and shop settings. Clears stock, sales, cash, customers (except Walk-in).</p>
+        <p className="mt-2 text-sm text-ink/70">
+          Clears stock, sales, cash, and customers (keeps logins and shop profile). Do not use on a live cloud shop unless you mean it.
+        </p>
         <div className="mt-3">
           <ConfirmButton
             label="Factory reset"

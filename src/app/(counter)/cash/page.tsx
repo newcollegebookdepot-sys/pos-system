@@ -46,10 +46,7 @@ export default async function CashPage({
 
   return (
     <div className="grid gap-6">
-      <PageHeader
-        title="Cash book & expenses"
-        description="Opening + sales paid + receipts + cash in − purchases/freight/rent/meal/zakat/other/outs/payable pays."
-      />
+      <PageHeader title="Cash" description="Opening, sales cash, receipts, expenses, and payable pays." />
       <Suspense>
         <PeriodBar />
       </Suspense>

@@ -10,6 +10,7 @@ export function BackupPanel() {
   return (
     <div className="card space-y-3 p-5">
       <h2 className="font-serif text-2xl">Backup</h2>
+      <p className="muted text-sm">Download a JSON copy. Prefer Turso dashboard backups for the live cloud shop.</p>
       <button
         type="button"
         className="btn btn-primary"
@@ -25,14 +26,14 @@ export function BackupPanel() {
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
-            a.download = `ncbd-backup-${new Date().toISOString().slice(0, 10)}.json`;
+            a.download = `pos-backup-${new Date().toISOString().slice(0, 10)}.json`;
             a.click();
             URL.revokeObjectURL(url);
             setMsg("Backup downloaded");
           })
         }
       >
-        Export full backup
+        Download backup
       </button>
       <label className="block text-sm">
         Restore from JSON

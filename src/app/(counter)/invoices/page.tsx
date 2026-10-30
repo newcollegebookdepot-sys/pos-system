@@ -34,7 +34,7 @@ export default async function InvoicesPage({
 
   return (
     <div>
-      <PageHeader title="Invoices & returns" description="Edit qty to return stock. Delete restores stock and ledger." />
+      <PageHeader title="Invoices" description="Edit qty to return · delete restores stock" />
       <Suspense>
         <PeriodBar />
       </Suspense>

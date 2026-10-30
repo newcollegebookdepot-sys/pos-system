@@ -50,8 +50,8 @@ export default async function StockPage({
   return (
     <div className="screen-stock grid gap-6">
       <PageHeader
-        title="Stock & batches"
-        description="Batches are identified by item name + buy cost. Same buy restocks; different buy creates the next Batch N."
+        title="Stock"
+        description="Same item + buy cost restocks a batch; different buy cost opens a new batch."
       />
 
       <div className="cards">

@@ -39,7 +39,7 @@ export default async function ContractBoardPage({ params }: { params: Promise<{ 
               BOQ ({boq.length})
             </Link>
             <Link href="/contracts/list" className="btn btn-secondary">
-              All contracts
+              Offices
             </Link>
           </div>
         }
@@ -47,12 +47,11 @@ export default async function ContractBoardPage({ params }: { params: Promise<{ 
 
       <div className="cards cash-sum">
         <article className="card cb-open">
-          <p className="card-title">Due this head</p>
+          <p className="card-title">Due</p>
           <p className="card-value mono">{formatMoney(summary.dueThisHead)}</p>
-          <p className="card-sub">Billed − received</p>
         </article>
         <article className="card cb-in">
-          <p className="card-title">Billed comparative</p>
+          <p className="card-title">Billed</p>
           <p className="card-value mono">{formatMoney(summary.billedTotal)}</p>
         </article>
         <article className="card cb-out">
@@ -66,20 +65,18 @@ export default async function ContractBoardPage({ params }: { params: Promise<{ 
         <article className="card">
           <p className="card-title">Cash taken</p>
           <p className="card-value mono">{formatMoney(summary.cashTakenTotal)}</p>
-          <p className="card-sub">Actual cash against alternate bills</p>
         </article>
         <article className="card">
-          <p className="card-title">Alternate cash billed</p>
+          <p className="card-title">Cash-alt billed</p>
           <p className="card-value mono">{formatMoney(summary.cashAlternateBilledCompr)}</p>
-          <p className="card-sub">Comparative stand-in total</p>
         </article>
       </div>
 
       <section className="box">
-        <h2>Office roll-up · {office.officeName}</h2>
+        <h2>Office · {office.officeName}</h2>
         <p className="muted">
           {office.heads} heads · billed {formatMoney(office.billedTotal)} · received{" "}
-          {formatMoney(office.receivedTotal)} · due all heads {formatMoney(office.dueAllHeads)}
+          {formatMoney(office.receivedTotal)} · due {formatMoney(office.dueAllHeads)}
         </p>
       </section>
 
@@ -168,15 +165,10 @@ export default async function ContractBoardPage({ params }: { params: Promise<{ 
       </div>
 
       <section className="box">
-        <h2>
-          Margin snapshot
-          <span className="muted" style={{ fontWeight: 600 }}>
-            Staff only — comparative vs NCBD
-          </span>
-        </h2>
+        <h2>Margin</h2>
         <p className="muted">
-          Head billed margin {formatMoney(summary.head.billedMargin)} · Cash-alt billed margin{" "}
-          {formatMoney(summary.cashAlternate.billedMargin)} · All entries {summary.entryCount}
+          Head {formatMoney(summary.head.billedMargin)} · Cash-alt{" "}
+          {formatMoney(summary.cashAlternate.billedMargin)} · {summary.entryCount} lines
         </p>
       </section>
 

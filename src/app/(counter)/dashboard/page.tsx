@@ -54,16 +54,11 @@ export default async function DashboardPage({
     <div>
       <PageHeader
         title="Dashboard"
-        description={`Period: ${period.label}`}
+        description={period.label}
         actions={
-          <div className="flex flex-wrap gap-2">
-            <Link href="/contracts" className="btn btn-secondary">
-              Office contracts
-            </Link>
-            <Link href="/analytics" className="btn btn-primary">
-              Analytics
-            </Link>
-          </div>
+          <Link href="/analytics" className="btn btn-primary">
+            Analytics
+          </Link>
         }
       />
       <Suspense>
