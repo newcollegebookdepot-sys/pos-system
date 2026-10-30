@@ -19,9 +19,11 @@ function sessionSecret() {
     return cachedSecret;
   }
 
-  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+  // Offline / local shop: persist a secret next to the DB (works for next start too).
+  // Cloud hosts without a writable disk should set SESSION_SECRET in the environment.
+  if (process.env.VERCEL === "1" && process.env.POS_USE_TURSO === "1") {
     throw new Error(
-      "SESSION_SECRET is required in production. Set a long random value in the Vercel project Environment Variables.",
+      "SESSION_SECRET is required when running on Vercel with Turso. Set it in project Environment Variables.",
     );
   }
 

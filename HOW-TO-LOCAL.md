@@ -1,9 +1,10 @@
-# Run the POS on your computer (non-technical)
+# Run the POS on your computer (offline)
 
-This starts a **practice / development** copy of the shop on your PC.  
-It does **not** change the live website. Live sales stay on Vercel + Turso.
+The shop runs **entirely on this PC**.  
+Database file: **`data/pos.sqlite`** (created/used automatically).
 
-For updating the live site after changes, see **HOW-TO.md**.
+There is no separate “cloud shop” for normal use.  
+See **[HOW-TO.md](./HOW-TO.md)** for production / backup rules.
 
 ---
 
@@ -13,100 +14,101 @@ For updating the live site after changes, see **HOW-TO.md**.
 
 1. Open [https://nodejs.org](https://nodejs.org)
 2. Download the **LTS** version (big green button)
-3. Run the installer → Next → Next → Finish
-4. Restart the computer if the installer asks you to
+3. Run the installer → Next → Finish
+4. Restart the PC if asked
 
-To check it worked: open **Terminal** (or PowerShell) and type:
+Check in Terminal / PowerShell:
 
 ```text
 node -v
 ```
 
-You should see a version like `v22.x.x`. If you see an error, Node is not installed correctly.
+You should see something like `v22.x.x`.
 
-### 2. Get the project folder
+### 2. Open the project
 
-Use whichever way you already have the code:
-
-- **GitHub Desktop:** clone or open the `pos-system` repository, **or**
-- Open the folder in **Cursor** / VS Code if it is already on this PC
-
-You need to be inside the folder that contains `package.json` (the project root).
+Open the folder that contains `package.json` (Cursor, VS Code, or GitHub Desktop).
 
 ---
 
-## Start the app (every day)
+## Development (test changes)
 
-1. Open the project in Cursor (or VS Code)
-2. Open a terminal: menu **Terminal → New Terminal**
-3. **First time only** in this folder (or after someone adds new packages), run:
+1. Terminal → New Terminal in the project folder  
+2. First time (or after updates):
 
 ```text
 npm install
 ```
 
-Wait until it finishes (can take a few minutes).
-
-4. Start the local server:
+3. Start:
 
 ```text
 npm run dev
 ```
 
-5. Leave that terminal window open. When it is ready, open a browser and go to:
+4. Browser: **http://localhost:3000**  
+5. Stop: **Ctrl+C** in the terminal  
 
-**http://localhost:3000**
-
-6. Sign in with a shop username and password (same style as the live site; this uses the **local** database file).
-
----
-
-## Stop the app
-
-Click the terminal window, then press:
-
-**Ctrl + C**
-
-If it asks to confirm, press **Y** then Enter.
+In the terminal you should see a line like:  
+`[pos] database: local SQLite (data/pos.sqlite)`  
+If you see Turso instead, something forced cloud mode — ask for help.
 
 ---
 
-## Important (read once)
+## Shop production (real counter)
 
-| Local (your PC) | Live shop (customers / counter) |
-|-----------------|----------------------------------|
-| `http://localhost:3000` | Your Vercel URL |
-| Data in `data/pos.sqlite` | Data in Turso cloud |
-| Safe to click around and test | Real money / real invoices |
+Use this during business hours (faster/stabler than `dev`):
 
-- Local and live data are **separate**. A sale on localhost does **not** appear on the live site.
-- Do **not** run `npm run danger:wipe-turso` — that can delete the **live** cloud database.
-- You do **not** need Turso or Vercel env vars just to run locally.
+```text
+npm run build
+npm run start:shop
+```
+
+Browser: **http://localhost:3000**  
+Stop: **Ctrl+C**
+
+After pulling new code: stop → `npm install` (if needed) → `npm run build` → `npm run start:shop`.
+
+**Never** run `dev` and `start:shop` at the same time.
+
+---
+
+## Important
+
+| | |
+|--|--|
+| App URL | http://localhost:3000 |
+| Shop data | `data/pos.sqlite` |
+| Login secret | `data/session.secret` (auto) |
+| Backup | Copy `data/pos.sqlite` while the app is **stopped** |
+
+- Do **not** run `npm run danger:wipe-turso`.  
+- Do **not** delete the `data` folder.  
+- Other PCs on the same Wi‑Fi can open `http://THIS-PC-IP:3000` if Windows Firewall allows Node (optional).
 
 ---
 
 ## Common problems
 
 **“npm is not recognized”**  
-Node.js is missing or the PC was not restarted after install. Reinstall Node LTS, restart, try again.
+Install Node LTS and restart the PC.
 
-**Page won’t open / “This site can’t be reached”**  
-Make sure `npm run dev` is still running in the terminal. Then open http://localhost:3000 again.
+**Page won’t open**  
+Confirm the terminal still shows the server running. Use http://localhost:3000
 
 **Port 3000 already in use**  
-Another copy of the app may still be running. Close other terminals, or stop them with Ctrl+C, then run `npm run dev` again.
+Stop the other terminal with Ctrl+C, then start again.
 
-**Red errors after `npm install` or `npm run dev`**  
-Copy the error text and ask for technical help. Do not run wipe/Turso scripts to “fix” it.
+**Login fails**  
+Use a user that exists in this PC’s `data/pos.sqlite`.
 
-**Login fails locally**  
-Use an account that exists in the local `data/pos.sqlite` (from this project). Live-only passwords may differ if data was never synced.
+**App feels very slow**  
+Should be local SQLite. Check the terminal for `[pos] database: local SQLite`. If it says Turso, unset cloud env and restart.
 
 ---
 
-## Short checklist
+## Short checklists
 
-1. `npm install` (first time)
-2. `npm run dev`
-3. Browser → http://localhost:3000
-4. When done → Ctrl+C in the terminal
+**Dev:** `npm install` → `npm run dev` → http://localhost:3000 → Ctrl+C when done  
+
+**Shop:** `npm run build` → `npm run start:shop` → http://localhost:3000 → backup `data/pos.sqlite` regularly  

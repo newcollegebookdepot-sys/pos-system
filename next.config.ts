@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   agentRules: false,
-  // Bundle the seed SQLite for local/dev; production on Vercel uses Turso.
+  // Bundle seed SQLite for offline local/shop production (default).
   outputFileTracingIncludes: {
     "/**": ["./data/pos.sqlite"],
   },

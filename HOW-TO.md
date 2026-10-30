@@ -1,30 +1,71 @@
-# POS — simple guide (non-technical)
+# POS — offline shop guide (non-technical)
 
-Live shop data lives in **Turso** (cloud). The website is on **Vercel**. Code is on **GitHub**.
+This POS runs on **one computer** in the shop.  
+All data is stored in a local file: **`data/pos.sqlite`**.  
+No Vercel / Turso needed for normal use.
 
-**First time on a new PC?** See **[HOW-TO-LOCAL.md](./HOW-TO-LOCAL.md)** (install Node, `npm install`, `npm run dev`).
+| Mode | When | Commands | Database |
+|------|------|----------|----------|
+| **Dev** | Testing changes | `npm run dev` | `data/pos.sqlite` |
+| **Shop (production)** | Real counter use | `npm run build` then `npm run start:shop` | `data/pos.sqlite` |
 
-## Everyday work (safe)
+**First-time setup on a PC:** see **[HOW-TO-LOCAL.md](./HOW-TO-LOCAL.md)**.
 
-1. Change the app on your computer.
-2. Test locally — see **HOW-TO-LOCAL.md** (`npm run dev`; uses the local file database — not the live shop).
-3. Push to GitHub branch **`main`**.
-4. Wait ~1–2 minutes. Vercel updates the live site by itself.
+---
 
-**That is all.** Schema/table changes in the code are applied on the live database automatically after deploy. You do **not** run database scripts for normal updates.
+## Shop day (production)
 
-## Do not do these (can wipe the real shop)
+1. Open the project folder in a terminal.
+2. If you just updated the code: `npm install` then `npm run build`.
+3. Start the shop server:
 
-- Do **not** run `npm run danger:wipe-turso` (or anything with “wipe” / “push-turso”).
-- Do **not** delete or change Environment Variables on Vercel (`TURSO_*`, `SESSION_SECRET`) unless someone technical asks you to.
-- Do **not** replace the live database with your local `data/pos.sqlite` after go-live — local and live data will differ; live is the real books.
+```text
+npm run start:shop
+```
 
-## If something looks broken after a push
+4. Leave that window open. Open a browser: **http://localhost:3000**
+5. End of day: click the terminal → **Ctrl+C** to stop.
 
-1. Open the Vercel project → Deployments → open the latest one → check it is **Ready** (not Error).
-2. Hard-refresh the site (Ctrl+F5) and try again.
-3. If it still fails, ask for technical help — do not run wipe scripts.
+**Do not** run `npm run dev` and `npm run start:shop` at the same time.
 
-## First-time cloud setup (already done if the site works)
+---
 
-Only needed once: Turso database, Vercel project linked to `main`, and three secrets (`TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `SESSION_SECRET`). After that, only Git pushes.
+## After code changes (safe order)
+
+1. Stop the server (Ctrl+C).
+2. `npm install` (only if packages changed).
+3. Test with `npm run dev` if you want.
+4. Stop dev (Ctrl+C).
+5. `npm run build`
+6. `npm run start:shop`
+
+---
+
+## Backup (important)
+
+Your shop books are **`data/pos.sqlite`**.
+
+1. Stop the app first (Ctrl+C).
+2. Copy `data/pos.sqlite` to a USB drive or a `backups` folder, e.g. `pos-2026-10-30.sqlite`.
+3. Start the app again.
+
+Do this regularly (daily is best).
+
+**Restore:** stop app → replace `data/pos.sqlite` with the backup file (same name) → start again.
+
+---
+
+## Do not do these
+
+- Do **not** run `npm run danger:wipe-turso` (legacy cloud wipe — can destroy cloud data if env vars are set).
+- Do **not** delete the `data` folder.
+- Do **not** set `POS_USE_TURSO=1` unless a technical person asks you to use cloud DB.
+
+---
+
+## If something breaks
+
+1. Confirm only one server is running.
+2. Hard-refresh the browser (Ctrl+F5).
+3. Check the terminal for red errors.
+4. Ask for technical help — do not run wipe scripts.

@@ -1,6 +1,7 @@
 /**
- * DANGEROUS: wipes Turso tables, then copies local data/pos.sqlite into the cloud DB.
- * Only for first-time setup or a deliberate full reset — never routine deploys.
+ * DANGEROUS / LEGACY: wipes Turso tables, then copies local data/pos.sqlite into a cloud DB.
+ * Normal shop use is OFFLINE local SQLite — do not run this.
+ * Requires POS_USE_TURSO=1 on the app side to even read Turso afterward.
  *
  *   $env:CONFIRM_WIPE="YES"
  *   $env:TURSO_DATABASE_URL="..."

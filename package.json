@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "start:shop": "next start",
     "danger:wipe-turso": "node scripts/push-to-turso.mjs"
   },
   "dependencies": {

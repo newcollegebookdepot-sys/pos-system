@@ -50,7 +50,12 @@ const globalForDb = globalThis as unknown as {
   posDbMigrated?: boolean;
 };
 
+/**
+ * Offline-first: local SQLite is the default for dev and shop production.
+ * Turso is only used when explicitly opted in (legacy/cloud), never by accident.
+ */
 function tursoConfigured() {
+  if (process.env.POS_USE_TURSO !== "1") return false;
   return Boolean(process.env.TURSO_DATABASE_URL?.trim());
 }
 
@@ -295,21 +300,21 @@ export async function getDb(): Promise<PosDb> {
     if (!globalForDb.posDbMigrated) {
       await ensureTursoMigrated(client);
       globalForDb.posDbMigrated = true;
+      console.info("[pos] database: Turso (POS_USE_TURSO=1)");
     }
     globalForDb.posDb = handle;
     return handle;
   }
 
-  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
-    throw new Error(
-      "This POS needs a durable database in production. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in the Vercel project env vars, then redeploy.",
-    );
-  }
-
+  // Local shop / offline production: durable file SQLite under data/
   const db = openLocalDb();
   await migrateLocal(db);
   const handle: LocalHandle = { kind: "local", db };
   globalForDb.posDb = handle;
+  if (!globalForDb.posDbMigrated) {
+    globalForDb.posDbMigrated = true;
+    console.info("[pos] database: local SQLite (data/pos.sqlite)");
+  }
   return handle;
 }
 
