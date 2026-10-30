@@ -1,16 +1,27 @@
 /**
- * Push local data/pos.sqlite into a Turso database (schema + rows).
+ * DANGEROUS: wipes Turso tables, then copies local data/pos.sqlite into the cloud DB.
+ * Only for first-time setup or a deliberate full reset — never routine deploys.
  *
- *   set TURSO_DATABASE_URL=...
- *   set TURSO_AUTH_TOKEN=...
- *   node scripts/push-to-turso.mjs
- *
- * WARNING: clears matching tables on Turso first, then copies from local file.
+ *   $env:CONFIRM_WIPE="YES"
+ *   $env:TURSO_DATABASE_URL="..."
+ *   $env:TURSO_AUTH_TOKEN="..."
+ *   npm run danger:wipe-turso
  */
 import fs from "node:fs";
 import path from "node:path";
 import { createClient } from "@libsql/client";
 import { DatabaseSync } from "node:sqlite";
+
+if (process.env.CONFIRM_WIPE !== "YES") {
+  console.error("");
+  console.error("REFUSED: this deletes ALL data in the Turso database.");
+  console.error("Day-to-day updates: push to GitHub main — Vercel + migrate handle the rest.");
+  console.error("First-time / intentional reset only:");
+  console.error('  set CONFIRM_WIPE=YES   (PowerShell: $env:CONFIRM_WIPE="YES")');
+  console.error("  then: npm run danger:wipe-turso");
+  console.error("");
+  process.exit(1);
+}
 
 const ROOT = process.cwd();
 const LOCAL = path.join(ROOT, "data", "pos.sqlite");
@@ -121,4 +132,4 @@ for (const table of TABLES) {
 
 local.close();
 remote.close();
-console.log("Done. Set the same TURSO_* vars on Vercel and redeploy.");
+console.log("Done. Keep TURSO_* and SESSION_SECRET on Vercel. Do NOT run this again for normal updates.");

@@ -1,4 +1,9 @@
-/** Shared CREATE TABLE DDL for local SQLite and Turso. */
+/**
+ * Shared CREATE TABLE DDL for local SQLite and Turso.
+ * Edit this file for new tables/columns, then push to main —
+ * production picks up the change automatically (see fingerprint in db.ts).
+ * If you add an ALTER for existing DBs, also append an id to PATCH_IDS in db.ts.
+ */
 export const SCHEMA_SQL = `
     CREATE TABLE IF NOT EXISTS settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),

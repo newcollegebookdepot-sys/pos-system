@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "push-turso": "node scripts/push-to-turso.mjs"
+    "danger:wipe-turso": "node scripts/push-to-turso.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

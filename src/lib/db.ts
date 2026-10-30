@@ -1,6 +1,7 @@
 import "server-only";
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createClient, type Client, type Transaction } from "@libsql/client";
@@ -16,8 +17,31 @@ export type PosDb = LocalHandle | TursoHandle;
 
 const tursoTx = new AsyncLocalStorage<Transaction>();
 
-/** Bump when migrateTurso gains new ALTER/seed steps that must re-run. */
-const SCHEMA_VERSION = 1;
+/**
+ * Auto fingerprint of schema + column patches.
+ * Changing SCHEMA_SQL or PATCH_IDS causes Turso to re-migrate on next request after deploy.
+ * No manual version bump required.
+ */
+const PATCH_IDS = [
+  "settings.address",
+  "settings.phone",
+  "settings.low_stock_threshold",
+  "settings.print_terms",
+  "settings.operator_name",
+  "ct_invoices.cash_taken_cents",
+  "ct_supply_entries.picked_qty_milli",
+  "ct_supply_entries.cash_alt_qty_milli",
+  "ct_supply_entries.line_cash_taken_cents",
+] as const;
+
+function schemaFingerprint() {
+  return createHash("sha256")
+    .update(SCHEMA_SQL)
+    .update("\n")
+    .update(PATCH_IDS.join("\n"))
+    .digest("hex")
+    .slice(0, 32);
+}
 
 const globalForDb = globalThis as unknown as {
   posDb?: PosDb;
@@ -115,16 +139,17 @@ async function migrateLocal(db: DatabaseSync) {
   }
 }
 
-async function tursoSchemaVersion(client: Client): Promise<number> {
+async function tursoStoredFingerprint(client: Client): Promise<string | null> {
   try {
-    const res = await client.execute("SELECT value FROM _pos_schema WHERE key = 'version'");
-    return Number(res.rows[0]?.value ?? 0);
+    const res = await client.execute("SELECT value FROM _pos_schema WHERE key = 'fingerprint'");
+    const fp = res.rows[0]?.value;
+    return fp == null ? null : String(fp);
   } catch {
-    return 0;
+    return null;
   }
 }
 
-async function setTursoSchemaVersion(client: Client, version: number) {
+async function setTursoFingerprint(client: Client, fingerprint: string) {
   await client.execute(`
     CREATE TABLE IF NOT EXISTS _pos_schema (
       key TEXT PRIMARY KEY NOT NULL,
@@ -132,13 +157,13 @@ async function setTursoSchemaVersion(client: Client, version: number) {
     )
   `);
   await client.execute({
-    sql: `INSERT INTO _pos_schema (key, value) VALUES ('version', ?)
+    sql: `INSERT INTO _pos_schema (key, value) VALUES ('fingerprint', ?)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    args: [String(version)],
+    args: [fingerprint],
   });
 }
 
-/** Full migrate — only when _pos_schema.version is behind SCHEMA_VERSION. */
+/** Full migrate — runs only when schema fingerprint changed (automatic on deploy). */
 async function migrateTurso(client: Client) {
   const stmts = splitStatements(SCHEMA_SQL).map((sql) => ({ sql }));
   if (stmts.length) await client.batch(stmts, "write");
@@ -220,11 +245,12 @@ async function migrateTurso(client: Client) {
     );
   }
 
-  await setTursoSchemaVersion(client, SCHEMA_VERSION);
+  await setTursoFingerprint(client, schemaFingerprint());
 }
 
 async function ensureTursoMigrated(client: Client) {
-  if ((await tursoSchemaVersion(client)) >= SCHEMA_VERSION) return;
+  const current = schemaFingerprint();
+  if ((await tursoStoredFingerprint(client)) === current) return;
   await migrateTurso(client);
 }
 
