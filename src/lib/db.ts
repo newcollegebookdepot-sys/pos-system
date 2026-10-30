@@ -32,6 +32,8 @@ const PATCH_IDS = [
   "ct_supply_entries.picked_qty_milli",
   "ct_supply_entries.cash_alt_qty_milli",
   "ct_supply_entries.line_cash_taken_cents",
+  "ct_boq_items.price_cents",
+  "firms.drop_gstin_app",
 ] as const;
 
 function schemaFingerprint() {
@@ -110,6 +112,11 @@ async function migrateLocal(db: DatabaseSync) {
   }
   if (!entNames.has("line_cash_taken_cents")) {
     db.exec("ALTER TABLE ct_supply_entries ADD COLUMN line_cash_taken_cents INTEGER NOT NULL DEFAULT 0");
+  }
+
+  const ctBoqCols = db.prepare("PRAGMA table_info(ct_boq_items)").all() as { name: string }[];
+  if (!ctBoqCols.some((c) => c.name === "price_cents")) {
+    db.exec("ALTER TABLE ct_boq_items ADD COLUMN price_cents INTEGER NOT NULL DEFAULT 0");
   }
   // Expand entry_kind check for mixed (SQLite ignores CHECK on ALTER; new DBs get it from schema)
   try {
@@ -207,6 +214,12 @@ async function migrateTurso(client: Client) {
       "ALTER TABLE ct_supply_entries ADD COLUMN line_cash_taken_cents INTEGER NOT NULL DEFAULT 0",
     );
   }
+
+  const ctBoqCols = await client.execute("PRAGMA table_info(ct_boq_items)");
+  if (!ctBoqCols.rows.some((r) => String(r.name) === "price_cents")) {
+    await client.execute("ALTER TABLE ct_boq_items ADD COLUMN price_cents INTEGER NOT NULL DEFAULT 0");
+  }
+
   try {
     await client.batch(
       [

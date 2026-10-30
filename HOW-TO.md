@@ -2,10 +2,12 @@
 
 Live shop data lives in **Turso** (cloud). The website is on **Vercel**. Code is on **GitHub**.
 
+**First time on a new PC?** See **[HOW-TO-LOCAL.md](./HOW-TO-LOCAL.md)** (install Node, `npm install`, `npm run dev`).
+
 ## Everyday work (safe)
 
 1. Change the app on your computer.
-2. Test with `npm run dev` (uses the local file database — not the live shop).
+2. Test locally — see **HOW-TO-LOCAL.md** (`npm run dev`; uses the local file database — not the live shop).
 3. Push to GitHub branch **`main`**.
 4. Wait ~1–2 minutes. Vercel updates the live site by itself.
 

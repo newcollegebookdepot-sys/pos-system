@@ -51,10 +51,6 @@ export default async function FirmsPage({
               <input name="vendorNumber" className="field" defaultValue={editing?.vendorNumber || ""} />
             </div>
             <div>
-              <label className="label">GSTIN</label>
-              <input name="gstin" className="field" defaultValue={editing?.gstin || ""} />
-            </div>
-            <div>
               <label className="label">Bank</label>
               <input name="bankName" className="field" defaultValue={editing?.bankName || ""} />
             </div>

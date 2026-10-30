@@ -22,7 +22,6 @@ export async function saveFirm(_state: ActionState, formData: FormData): Promise
       address: optionalText(field(formData, "address"), "Address", 500),
       phone: optionalText(field(formData, "phone"), "Phone", 40),
       email: optionalText(field(formData, "email"), "Email", 120),
-      gstin: optionalText(field(formData, "gstin"), "GSTIN", 20),
       vendorNumber: optionalText(field(formData, "vendorNumber"), "Vendor #", 50),
       bankName: optionalText(field(formData, "bankName"), "Bank", 150),
       accountHolder: optionalText(field(formData, "accountHolder"), "Account holder", 200),

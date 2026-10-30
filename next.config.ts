@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/**": ["./data/pos.sqlite"],
   },
-  serverExternalPackages: ["@libsql/client"],
+  serverExternalPackages: ["@libsql/client", "xlsx"],
 };
 
 export default nextConfig;

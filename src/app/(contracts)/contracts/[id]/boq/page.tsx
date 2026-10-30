@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { formatMoney, moneyToInput } from "@/lib/money";
 import { listBoq } from "@/lib/repo/contracts/boq";
 import { getContract } from "@/lib/repo/contracts/contracts";
-import { clearBoq, removeBoqItem, saveBoqItem, uploadBoqCsv } from "@/server/contracts/boq";
+import { clearBoq, removeBoqItem, saveBoqItem, uploadBoq } from "@/server/contracts/boq";
 
 export const metadata = { title: "BOQ rates" };
 
@@ -64,6 +64,14 @@ export default async function BoqPage({
               <input name="unit" className="field" defaultValue={editing?.unit || ""} />
             </div>
             <div>
+              <label className="label">Price</label>
+              <input
+                name="price"
+                className="field"
+                defaultValue={editing ? moneyToInput(editing.priceCents) : ""}
+              />
+            </div>
+            <div>
               <label className="label">Comparative</label>
               <input
                 name="comparative"
@@ -82,7 +90,7 @@ export default async function BoqPage({
               />
             </div>
             <div>
-              <label className="label">Listed on comparative</label>
+              <label className="label">Listed (Compr. Check)</label>
               <select name="listed" className="field" defaultValue={editing && !editing.comparativeListed ? "0" : "1"}>
                 <option value="1">Yes</option>
                 <option value="0">No</option>
@@ -107,13 +115,19 @@ export default async function BoqPage({
       </section>
 
       <section className="box">
-        <h2>CSV import</h2>
-        <p className="muted mb-2">serial, name, unit, comparative, ncbd</p>
-        <ActionForm action={uploadBoqCsv} successMessage="Imported">
+        <h2>Import Excel / CSV</h2>
+        <p className="muted mb-2">S.No, Item, Unit, Price, Comparative, Check, NCBD</p>
+        <ActionForm action={uploadBoq} successMessage="Imported">
           <input type="hidden" name="contractId" value={id} />
-          <input type="file" name="file" accept=".csv,text/csv" required className="field" />
+          <input
+            type="file"
+            name="file"
+            accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+            required
+            className="field"
+          />
           <button className="btn btn-secondary btn-sm" type="submit">
-            Upload CSV
+            Upload
           </button>
         </ActionForm>
       </section>
@@ -135,6 +149,7 @@ export default async function BoqPage({
                 <th>#</th>
                 <th>Item</th>
                 <th>Unit</th>
+                <th className="right">Price</th>
                 <th className="right">Comparative</th>
                 <th className="right">NCBD</th>
                 <th />
@@ -149,6 +164,7 @@ export default async function BoqPage({
                     {!b.comparativeListed ? <span className="badge badge-low">unlisted</span> : null}
                   </td>
                   <td>{b.unit || "—"}</td>
+                  <td className="right mono">{formatMoney(b.priceCents)}</td>
                   <td className="right mono">{formatMoney(b.comparativeCents)}</td>
                   <td className="right mono">{formatMoney(b.ncbdCents)}</td>
                   <td className="right">

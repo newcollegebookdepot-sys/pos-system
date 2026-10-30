@@ -11,7 +11,6 @@ export type CtFirm = {
   address: string | null;
   phone: string | null;
   email: string | null;
-  gstin: string | null;
   vendorNumber: string | null;
   bankName: string | null;
   accountHolder: string | null;
@@ -28,7 +27,6 @@ type Row = {
   address: string | null;
   phone: string | null;
   email: string | null;
-  gstin: string | null;
   vendor_number: string | null;
   bank_name: string | null;
   account_holder: string | null;
@@ -46,7 +44,6 @@ function map(row: Row): CtFirm {
     address: row.address,
     phone: row.phone,
     email: row.email,
-    gstin: row.gstin,
     vendorNumber: row.vendor_number,
     bankName: row.bank_name,
     accountHolder: row.account_holder,
@@ -78,7 +75,6 @@ export async function upsertFirm(input: {
   address?: string | null;
   phone?: string | null;
   email?: string | null;
-  gstin?: string | null;
   vendorNumber?: string | null;
   bankName?: string | null;
   accountHolder?: string | null;
@@ -97,7 +93,6 @@ export async function upsertFirm(input: {
     input.address?.trim() || null,
     input.phone?.trim() || null,
     input.email?.trim() || null,
-    input.gstin?.trim() || null,
     input.vendorNumber?.trim() || null,
     input.bankName?.trim() || null,
     input.accountHolder?.trim() || null,
@@ -110,7 +105,7 @@ export async function upsertFirm(input: {
   if (input.id) {
     const updated = await run(
       db,
-      `UPDATE ct_firms SET name=?, legal_name=?, address=?, phone=?, email=?, gstin=?, vendor_number=?,
+      `UPDATE ct_firms SET name=?, legal_name=?, address=?, phone=?, email=?, vendor_number=?,
        bank_name=?, account_holder=?, account_number=?, branch_name=?, notes=?, active=?, updated_at=?
        WHERE id=?`,
       [...vals, input.id],
@@ -121,9 +116,9 @@ export async function upsertFirm(input: {
   try {
     const inserted = await run(
       db,
-      `INSERT INTO ct_firms (name, legal_name, address, phone, email, gstin, vendor_number,
+      `INSERT INTO ct_firms (name, legal_name, address, phone, email, vendor_number,
         bank_name, account_holder, account_number, branch_name, notes, active, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [...vals, when],
     );
     return inserted.id;
