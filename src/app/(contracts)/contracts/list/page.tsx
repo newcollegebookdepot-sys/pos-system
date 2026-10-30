@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ActionForm } from "@/components/action-form";
 import { PageHeader } from "@/components/page-header";
-import { requireManager } from "@/lib/auth";
 import { CT_CONTRACT_STATUSES } from "@/lib/domain/contracts";
 import { listContracts } from "@/lib/repo/contracts/contracts";
 import { listFirms } from "@/lib/repo/contracts/firms";
@@ -10,7 +9,6 @@ import { saveContract } from "@/server/contracts/contracts";
 export const metadata = { title: "Contracts list" };
 
 export default async function ContractsListPage() {
-  await requireManager();
   const contracts = await listContracts();
   const firms = await listFirms(true);
 

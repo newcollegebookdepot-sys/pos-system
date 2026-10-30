@@ -245,17 +245,23 @@ export async function officeSummary(officeName: string) {
 
 export async function contractsDashboardStats() {
   const db = await getDb();
-  const firms = await getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM ct_firms WHERE active = 1");
-  const contracts = await getRow<{ n: number }>(
+  const counts = await getRow<{ firms: number; contracts: number; boq: number }>(
     db,
-    "SELECT COUNT(*) AS n FROM ct_contracts WHERE status = 'active'",
+    `SELECT
+       (SELECT COUNT(*) FROM ct_firms WHERE active = 1) AS firms,
+       (SELECT COUNT(*) FROM ct_contracts WHERE status = 'active') AS contracts,
+       (SELECT COUNT(*) FROM ct_boq_items WHERE active = 1) AS boq`,
   );
-  const boq = await getRow<{ n: number }>(db, "SELECT COUNT(*) AS n FROM ct_boq_items WHERE active = 1");
-  const recent = await listContracts();
+  const recent = (
+    await allRows<Row>(
+      db,
+      `${SELECT} ORDER BY c.id DESC LIMIT 8`,
+    )
+  ).map(map);
   return {
-    firms: Number(firms?.n || 0),
-    contracts: Number(contracts?.n || 0),
-    boqItems: Number(boq?.n || 0),
-    recent: recent.slice(0, 8),
+    firms: Number(counts?.firms || 0),
+    contracts: Number(counts?.contracts || 0),
+    boqItems: Number(counts?.boq || 0),
+    recent,
   };
 }

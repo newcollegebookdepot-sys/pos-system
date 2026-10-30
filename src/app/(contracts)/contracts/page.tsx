@@ -1,11 +1,9 @@
 import Link from "next/link";
-import { requireManager } from "@/lib/auth";
 import { contractsDashboardStats } from "@/lib/repo/contracts/contracts";
 
 export const metadata = { title: "Office contracts" };
 
 export default async function ContractsDashboardPage() {
-  await requireManager();
   const stats = await contractsDashboardStats();
 
   return (

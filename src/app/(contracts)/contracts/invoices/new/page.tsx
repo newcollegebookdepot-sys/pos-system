@@ -1,6 +1,5 @@
 import { ContractInvoiceComposer } from "@/components/contract-invoice-composer";
 import { PageHeader } from "@/components/page-header";
-import { requireManager } from "@/lib/auth";
 import { getContract } from "@/lib/repo/contracts/contracts";
 
 export const metadata = { title: "New contract invoice" };
@@ -10,7 +9,6 @@ export default async function NewContractInvoicePage({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  await requireManager();
   const sp = await searchParams;
   const contractId = sp.contractId ? Number(sp.contractId) : undefined;
   const contract = contractId ? await getContract(contractId) : null;

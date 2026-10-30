@@ -16,6 +16,9 @@ export type PosDb = LocalHandle | TursoHandle;
 
 const tursoTx = new AsyncLocalStorage<Transaction>();
 
+/** Bump when migrateTurso gains new ALTER/seed steps that must re-run. */
+const SCHEMA_VERSION = 1;
+
 const globalForDb = globalThis as unknown as {
   posDb?: PosDb;
   posDbMigrated?: boolean;
@@ -112,17 +115,40 @@ async function migrateLocal(db: DatabaseSync) {
   }
 }
 
+async function tursoSchemaVersion(client: Client): Promise<number> {
+  try {
+    const res = await client.execute("SELECT value FROM _pos_schema WHERE key = 'version'");
+    return Number(res.rows[0]?.value ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+async function setTursoSchemaVersion(client: Client, version: number) {
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS _pos_schema (
+      key TEXT PRIMARY KEY NOT NULL,
+      value TEXT NOT NULL
+    )
+  `);
+  await client.execute({
+    sql: `INSERT INTO _pos_schema (key, value) VALUES ('version', ?)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    args: [String(version)],
+  });
+}
+
+/** Full migrate — only when _pos_schema.version is behind SCHEMA_VERSION. */
 async function migrateTurso(client: Client) {
-  for (const stmt of splitStatements(SCHEMA_SQL)) {
-    await client.execute(stmt);
-  }
-  for (const table of ["sale_items", "stock_movements", "sales", "products"]) {
-    try {
-      await client.execute(`DROP TABLE IF EXISTS ${table}`);
-    } catch {
-      // ignore
-    }
-  }
+  const stmts = splitStatements(SCHEMA_SQL).map((sql) => ({ sql }));
+  if (stmts.length) await client.batch(stmts, "write");
+
+  await client.batch(
+    ["sale_items", "stock_movements", "sales", "products"].map((table) => ({
+      sql: `DROP TABLE IF EXISTS ${table}`,
+    })),
+    "write",
+  );
 
   const cols = await client.execute("PRAGMA table_info(settings)");
   const names = new Set(cols.rows.map((r) => String(r.name)));
@@ -157,11 +183,16 @@ async function migrateTurso(client: Client) {
     );
   }
   try {
-    await client.execute(
-      `UPDATE ct_supply_entries SET picked_qty_milli = qty_milli WHERE picked_qty_milli IS NULL AND entry_kind = 'normal'`,
-    );
-    await client.execute(
-      `UPDATE ct_supply_entries SET cash_alt_qty_milli = qty_milli, picked_qty_milli = 0 WHERE cash_alt_qty_milli IS NULL AND entry_kind = 'cash_alternate'`,
+    await client.batch(
+      [
+        {
+          sql: `UPDATE ct_supply_entries SET picked_qty_milli = qty_milli WHERE picked_qty_milli IS NULL AND entry_kind = 'normal'`,
+        },
+        {
+          sql: `UPDATE ct_supply_entries SET cash_alt_qty_milli = qty_milli, picked_qty_milli = 0 WHERE cash_alt_qty_milli IS NULL AND entry_kind = 'cash_alternate'`,
+        },
+      ],
+      "write",
     );
   } catch {
     // ignore
@@ -180,13 +211,21 @@ async function migrateTurso(client: Client) {
   const opCount = await client.execute("SELECT COUNT(*) AS n FROM operators");
   if (Number(opCount.rows[0]?.n || 0) === 0) {
     const when = new Date().toISOString();
-    for (const name of ["M. Akif", "Sohaib Alam"]) {
-      await client.execute({
+    await client.batch(
+      ["M. Akif", "Sohaib Alam"].map((name) => ({
         sql: "INSERT INTO operators (name, active, created_at) VALUES (?, 1, ?)",
         args: [name, when],
-      });
-    }
+      })),
+      "write",
+    );
   }
+
+  await setTursoSchemaVersion(client, SCHEMA_VERSION);
+}
+
+async function ensureTursoMigrated(client: Client) {
+  if ((await tursoSchemaVersion(client)) >= SCHEMA_VERSION) return;
+  await migrateTurso(client);
 }
 
 function openLocalDb() {
@@ -215,7 +254,7 @@ export async function getDb(): Promise<PosDb> {
     });
     const handle: TursoHandle = { kind: "turso", client };
     if (!globalForDb.posDbMigrated) {
-      await migrateTurso(client);
+      await ensureTursoMigrated(client);
       globalForDb.posDbMigrated = true;
     }
     globalForDb.posDb = handle;

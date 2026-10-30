@@ -4,7 +4,6 @@ import { ConfirmButton } from "@/components/confirm-button";
 import { ContractInvoiceComposer } from "@/components/contract-invoice-composer";
 import { PageHeader } from "@/components/page-header";
 import { PrintButton } from "@/components/print-button";
-import { requireManager } from "@/lib/auth";
 import { comparativeSerialLabel } from "@/lib/domain/contracts";
 import { formatMoney } from "@/lib/money";
 import { getFirm } from "@/lib/repo/contracts/firms";
@@ -24,7 +23,6 @@ export default async function ContractInvoiceDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ edit?: string; print?: string }>;
 }) {
-  await requireManager();
   const { id: raw } = await params;
   const sp = await searchParams;
   if (!/^\d+$/.test(raw)) notFound();

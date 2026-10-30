@@ -2,7 +2,6 @@ import Link from "next/link";
 import { ContractInvoiceRowActions } from "@/components/contract-invoice-row-actions";
 import { ContractOfficesFilter } from "@/components/contract-offices-filter";
 import { PageHeader } from "@/components/page-header";
-import { requireManager } from "@/lib/auth";
 import { formatMoney } from "@/lib/money";
 import { listCtInvoices, listOfficesForInvoices } from "@/lib/repo/contracts/invoices";
 
@@ -13,7 +12,6 @@ export default async function ContractInvoicesPage({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  await requireManager();
   const sp = await searchParams;
   const office = sp.office?.trim() || "";
   const status = sp.status === "draft" || sp.status === "billed" ? sp.status : undefined;

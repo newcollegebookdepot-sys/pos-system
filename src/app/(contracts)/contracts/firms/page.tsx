@@ -2,7 +2,6 @@ import Link from "next/link";
 import { ActionForm } from "@/components/action-form";
 import { ConfirmButton } from "@/components/confirm-button";
 import { PageHeader } from "@/components/page-header";
-import { requireManager } from "@/lib/auth";
 import { listFirms } from "@/lib/repo/contracts/firms";
 import { removeFirm, saveFirm } from "@/server/contracts/firms";
 
@@ -13,7 +12,6 @@ export default async function FirmsPage({
 }: {
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  await requireManager();
   const sp = await searchParams;
   const editId = sp.edit ? Number(sp.edit) : null;
   const firms = await listFirms();

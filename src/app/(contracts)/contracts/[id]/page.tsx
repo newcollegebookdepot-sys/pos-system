@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import { ActionForm } from "@/components/action-form";
 import { ConfirmButton } from "@/components/confirm-button";
 import { PageHeader } from "@/components/page-header";
-import { requireManager } from "@/lib/auth";
 import { formatMoney } from "@/lib/money";
 import { listBoq } from "@/lib/repo/contracts/boq";
 import { contractSummary, getContract, officeSummary } from "@/lib/repo/contracts/contracts";
@@ -14,7 +13,6 @@ import { removeContract, removePayment, savePayment } from "@/server/contracts/c
 export const metadata = { title: "Contract board" };
 
 export default async function ContractBoardPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireManager();
   const { id: idRaw } = await params;
   const id = Number(idRaw);
   const contract = await getContract(id);

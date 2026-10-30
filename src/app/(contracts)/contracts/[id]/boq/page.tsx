@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import { ActionForm } from "@/components/action-form";
 import { ConfirmButton } from "@/components/confirm-button";
 import { PageHeader } from "@/components/page-header";
-import { requireManager } from "@/lib/auth";
 import { formatMoney, moneyToInput } from "@/lib/money";
 import { listBoq } from "@/lib/repo/contracts/boq";
 import { getContract } from "@/lib/repo/contracts/contracts";
@@ -18,7 +17,6 @@ export default async function BoqPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  await requireManager();
   const { id: idRaw } = await params;
   const id = Number(idRaw);
   const contract = await getContract(id);
