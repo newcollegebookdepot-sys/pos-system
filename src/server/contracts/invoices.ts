@@ -83,6 +83,7 @@ export async function apiLoadInvoiceBootstrap(invoiceId: number) {
     status: inv.status,
     demandNo: inv.demandNo || "",
     entryKind: (inv.entries[0]?.entryKind || "normal") as CtEntryKind,
+    cashTakenCents: inv.cashTakenCents,
     lines: inv.entries.map(entryToComposerLine),
   };
 }
@@ -120,6 +121,12 @@ function parseLines(raw: unknown): ComposerLinePayload[] {
       comparativeListed: l.comparativeListed !== false,
       comparativeSerial: l.comparativeSerial != null ? Number(l.comparativeSerial) : null,
       entryKind: l.entryKind === "cash_alternate" ? "cash_alternate" : "normal",
+      pickedQty: l.pickedQty != null && l.pickedQty !== "" ? Number(l.pickedQty) : null,
+      cashAltQty: l.cashAltQty != null && l.cashAltQty !== "" ? Number(l.cashAltQty) : null,
+      lineCashTakenCents:
+        typeof l.lineCashTakenCents === "number"
+          ? roundCents(l.lineCashTakenCents)
+          : tryParseMoney(String(l.lineCashTaken || l.lineCashTakenCents || "0")) || 0,
       demandNo: String(l.demandNo || ""),
       notes: String(l.notes || ""),
     };
@@ -134,6 +141,7 @@ export async function saveComposerInvoice(payload: {
   notes?: string;
   demandNo?: string;
   entryKind?: CtEntryKind;
+  cashTakenCents?: number;
   lines: unknown[];
 }): Promise<{ ok: true; invoiceId: number } | { error: string }> {
   await requireManager();
@@ -145,6 +153,7 @@ export async function saveComposerInvoice(payload: {
       notes: payload.notes,
       demandNo: payload.demandNo,
       entryKind: payload.entryKind,
+      cashTakenCents: Number(payload.cashTakenCents || 0),
       lines: parseLines(payload.lines),
     };
     let id: number;

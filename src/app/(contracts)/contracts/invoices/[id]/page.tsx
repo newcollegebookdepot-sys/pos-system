@@ -5,6 +5,7 @@ import { ContractInvoiceComposer } from "@/components/contract-invoice-composer"
 import { PageHeader } from "@/components/page-header";
 import { PrintButton } from "@/components/print-button";
 import { requireManager } from "@/lib/auth";
+import { comparativeSerialLabel } from "@/lib/domain/contracts";
 import { formatMoney } from "@/lib/money";
 import { getFirm } from "@/lib/repo/contracts/firms";
 import { getContract } from "@/lib/repo/contracts/contracts";
@@ -33,14 +34,14 @@ export default async function ContractInvoiceDetailPage({
   if (!contract) notFound();
   const firm = await getFirm(contract.firmId);
   const today = new Date().toISOString().slice(0, 10);
-  const editing = sp.edit === "1" && inv.status === "draft";
+  const editing = sp.edit === "1";
 
   if (editing) {
     return (
       <div>
         <PageHeader
           title={`Edit invoice ${inv.invoiceNumber}`}
-          description={`${inv.officeName} · ${inv.contractHead}`}
+          description={`${inv.officeName} · ${inv.contractHead} · ${inv.status}`}
           actions={
             <Link href={`/contracts/invoices/${inv.id}`} className="btn btn-secondary">
               Cancel
@@ -61,6 +62,7 @@ export default async function ContractInvoiceDetailPage({
             status: inv.status,
             demandNo: inv.demandNo || "",
             entryKind: inv.entries[0]?.entryKind || "normal",
+            cashTakenCents: inv.cashTakenCents,
             lines: inv.entries.map((e) => ({
               boqItemId: e.boqItemId,
               itemName: e.itemName,
@@ -74,6 +76,9 @@ export default async function ContractInvoiceDetailPage({
               comparativeSerial: e.comparativeSerial,
               comparativeListed: e.comparativeListed,
               entryKind: e.entryKind,
+              pickedQty: e.pickedQty,
+              cashAltQty: e.cashAltQty,
+              lineCashTakenCents: e.lineCashTakenCents,
             })),
           }}
         />
@@ -85,22 +90,20 @@ export default async function ContractInvoiceDetailPage({
     <div>
       <div className="no-print mb-4 flex flex-wrap gap-2">
         <PrintButton />
+        <Link href={`/contracts/invoices/${inv.id}?edit=1`} className="btn btn-secondary">
+          Edit
+        </Link>
         {inv.status === "draft" ? (
-          <>
-            <Link href={`/contracts/invoices/${inv.id}?edit=1`} className="btn btn-secondary">
-              Edit
-            </Link>
-            <ConfirmButton
-              label="Mark billed"
-              confirm="Mark this invoice billed? It will count toward dues."
-              action={billCtInvoice.bind(null, inv.id)}
-              tone="default"
-            />
-          </>
+          <ConfirmButton
+            label="Mark billed"
+            confirm="Mark this invoice billed? It will count toward dues."
+            action={billCtInvoice.bind(null, inv.id)}
+            tone="default"
+          />
         ) : (
           <ConfirmButton
-            label="Revert to draft"
-            confirm="Revert to draft? It will leave billed dues."
+            label="Mark unbilled"
+            confirm="Revert to draft / unbilled? It will leave billed dues."
             action={unbillCtInvoice.bind(null, inv.id)}
             tone="default"
           />
@@ -132,6 +135,7 @@ export default async function ContractInvoiceDetailPage({
           <span className={`badge ${inv.status === "billed" ? "badge-paid" : "badge-partial"}`}>
             {inv.status}
           </span>
+          {inv.hasCashAlternate ? <span className="badge badge-low">cash alternate</span> : null}
         </h2>
         <p className="muted">
           {inv.officeName} · {inv.contractHead} · {inv.firmName} · {inv.isoDate}
@@ -152,6 +156,20 @@ export default async function ContractInvoiceDetailPage({
               {formatMoney(inv.comparativeTotalCents - inv.ncbdTotalCents)}
             </p>
           </article>
+          {inv.hasCashAlternate || inv.cashTakenCents > 0 ? (
+            <>
+              <article className="card">
+                <p className="card-title">Cash taken</p>
+                <p className="card-value mono">{formatMoney(inv.cashTakenCents)}</p>
+                <p className="card-sub">Actual cash they took</p>
+              </article>
+              <article className="card">
+                <p className="card-title">Alternate cash billed</p>
+                <p className="card-value mono">{formatMoney(inv.cashAlternateComparativeCents)}</p>
+                <p className="card-sub">Comparative stand-in lines</p>
+              </article>
+            </>
+          ) : null}
         </div>
       </section>
 
@@ -212,7 +230,7 @@ export default async function ContractInvoiceDetailPage({
           </div>
         </div>
 
-        <table className="inv-table">
+        <table className="inv-table ct-inv-print">
           <thead>
             <tr>
               <th className="c-no">#</th>
@@ -221,24 +239,26 @@ export default async function ContractInvoiceDetailPage({
               <th className="c-qty">Qty</th>
               <th className="c-rate">Rate</th>
               <th className="c-amt">Amount</th>
+              <th className="c-serial">Comparative serial no.</th>
             </tr>
           </thead>
           <tbody>
             {inv.entries.map((e, i) => (
               <tr key={e.id}>
-                <td className="c-no">{e.comparativeSerial ?? i + 1}</td>
+                <td className="c-no">{i + 1}</td>
                 <td className="c-desc">
                   {e.itemName}
-                  {e.entryKind === "cash_alternate" ? (
-                    <span className="no-print" style={{ marginLeft: 6, fontSize: 10, color: "#64748b" }}>
-                      (cash alt)
-                    </span>
-                  ) : null}
+                  <span className="no-print" style={{ display: "block", fontSize: 10, color: "#64748b" }}>
+                    picked {e.pickedQty}
+                    {e.cashAltQty > 0 ? ` · cash alt ${e.cashAltQty}` : ""}
+                    {e.lineCashTakenCents > 0 ? ` · cash ${formatMoney(e.lineCashTakenCents)}` : ""}
+                  </span>
                 </td>
                 <td className="c-unit">{e.unit || "—"}</td>
                 <td className="c-qty">{e.qty}</td>
                 <td className="c-rate">{formatMoney(e.comparativeCents)}</td>
                 <td className="c-amt">{formatMoney(e.comparativeTotalCents)}</td>
+                <td className="c-serial">{comparativeSerialLabel(e.comparativeListed, e.comparativeSerial)}</td>
               </tr>
             ))}
           </tbody>
@@ -252,6 +272,9 @@ export default async function ContractInvoiceDetailPage({
         ) : null}
         <p className="no-print" style={{ marginTop: 16, fontSize: 11, color: "#94a3b8" }}>
           Print shows comparative rates only. NCBD {formatMoney(inv.ncbdTotalCents)} is staff-only.
+          {inv.hasCashAlternate
+            ? ` Cash taken ${formatMoney(inv.cashTakenCents)} · alternate billed ${formatMoney(inv.cashAlternateComparativeCents)}.`
+            : ""}
         </p>
       </article>
     </div>

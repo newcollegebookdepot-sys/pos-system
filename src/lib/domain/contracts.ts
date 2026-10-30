@@ -5,6 +5,60 @@ export type CtEntryKind = "normal" | "cash_alternate";
 export type CtInvoiceStatus = "draft" | "billed";
 export type CtContractStatus = "active" | "completed" | "suspended" | "cancelled";
 
+/** Resolve how a billed qty splits into picked vs cash-alternate. */
+export function resolveLineSplit(input: {
+  qty: number;
+  pickedQty?: number | null;
+  cashAltQty?: number | null;
+  entryKind?: CtEntryKind;
+}) {
+  const qty = Number(input.qty) || 0;
+  let picked = input.pickedQty != null && Number.isFinite(Number(input.pickedQty)) ? Number(input.pickedQty) : null;
+  let cashAlt =
+    input.cashAltQty != null && Number.isFinite(Number(input.cashAltQty)) ? Number(input.cashAltQty) : null;
+
+  if (picked == null && cashAlt == null) {
+    if (input.entryKind === "cash_alternate") {
+      picked = 0;
+      cashAlt = qty;
+    } else {
+      picked = qty;
+      cashAlt = 0;
+    }
+  } else if (picked == null) {
+    picked = Math.max(0, qty - (cashAlt || 0));
+  } else if (cashAlt == null) {
+    cashAlt = Math.max(0, qty - picked);
+  }
+
+  let pickedQty = Math.max(0, picked ?? 0);
+  let cashAltQty = Math.max(0, cashAlt ?? 0);
+  if (pickedQty + cashAltQty === 0 && qty > 0) {
+    pickedQty = qty;
+    cashAltQty = 0;
+  }
+
+  // Persist only normal|cash_alternate; mixed is expressed via both qty fields.
+  const entryKind: CtEntryKind = cashAltQty > 0 && pickedQty <= 0 ? "cash_alternate" : "normal";
+  return { qty, pickedQty, cashAltQty, entryKind, isMixed: cashAltQty > 0 && pickedQty > 0 };
+}
+
+export function splitComparativeTotals(comparativeTotalCents: number, ncbdTotalCents: number, pickedQty: number, cashAltQty: number) {
+  const totalQty = pickedQty + cashAltQty;
+  if (totalQty <= 0) {
+    return { pickedCompr: comparativeTotalCents, cashCompr: 0, pickedNcbd: ncbdTotalCents, cashNcbd: 0 };
+  }
+  const cashShare = cashAltQty / totalQty;
+  const cashCompr = roundCents(comparativeTotalCents * cashShare);
+  const cashNcbd = roundCents(ncbdTotalCents * cashShare);
+  return {
+    pickedCompr: comparativeTotalCents - cashCompr,
+    cashCompr,
+    pickedNcbd: ncbdTotalCents - cashNcbd,
+    cashNcbd,
+  };
+}
+
 export const CT_CONTRACT_STATUSES: CtContractStatus[] = [
   "active",
   "completed",
@@ -160,35 +214,67 @@ export type EntryForSummary = {
   comparativeTotalCents: number;
   ncbdTotalCents: number;
   billingState: "unbilled" | "billed" | "on_draft";
+  pickedQty?: number | null;
+  cashAltQty?: number | null;
+  lineCashTakenCents?: number;
 };
+
+function addToBucket(
+  target: TotalsBucket,
+  compr: number,
+  ncbd: number,
+  billingState: EntryForSummary["billingState"],
+) {
+  const margin = compr - ncbd;
+  target.allCompr += compr;
+  target.allNcbd += ncbd;
+  target.allMargin += margin;
+  if (billingState === "billed") {
+    target.billedCompr += compr;
+    target.billedNcbd += ncbd;
+    target.billedMargin += margin;
+    target.billedCount++;
+  } else if (billingState === "unbilled") {
+    target.unbilledCompr += compr;
+    target.unbilledNcbd += ncbd;
+    target.unbilledMargin += margin;
+    target.unbilledCount++;
+  } else {
+    target.draftCompr += compr;
+    target.draftCount++;
+  }
+}
 
 export function summarizeContractEntries(
   entries: EntryForSummary[],
   receivedCents: number,
+  cashTakenOverrideCents?: number,
 ) {
   const head = emptyBucket();
   const cash = emptyBucket();
+  let lineCashTaken = 0;
   for (const entry of entries) {
-    const target = entry.entryKind === "cash_alternate" ? cash : head;
-    const compr = roundCents(entry.comparativeTotalCents);
-    const ncbd = roundCents(entry.ncbdTotalCents);
-    const margin = compr - ncbd;
-    target.allCompr += compr;
-    target.allNcbd += ncbd;
-    target.allMargin += margin;
-    if (entry.billingState === "billed") {
-      target.billedCompr += compr;
-      target.billedNcbd += ncbd;
-      target.billedMargin += margin;
-      target.billedCount++;
-    } else if (entry.billingState === "unbilled") {
-      target.unbilledCompr += compr;
-      target.unbilledNcbd += ncbd;
-      target.unbilledMargin += margin;
-      target.unbilledCount++;
-    } else {
-      target.draftCompr += compr;
-      target.draftCount++;
+    lineCashTaken += roundCents(entry.lineCashTakenCents || 0);
+    const split = resolveLineSplit({
+      qty: (entry.pickedQty || 0) + (entry.cashAltQty || 0) || 1,
+      pickedQty: entry.pickedQty,
+      cashAltQty: entry.cashAltQty,
+      entryKind: entry.entryKind,
+    });
+    // Prefer explicit qty fields when present on the entry
+    const pickedQty = entry.pickedQty != null ? Number(entry.pickedQty) : split.pickedQty;
+    const cashAltQty = entry.cashAltQty != null ? Number(entry.cashAltQty) : split.cashAltQty;
+    const parts = splitComparativeTotals(
+      entry.comparativeTotalCents,
+      entry.ncbdTotalCents,
+      pickedQty,
+      cashAltQty,
+    );
+    if (parts.pickedCompr || parts.pickedNcbd) {
+      addToBucket(head, parts.pickedCompr, parts.pickedNcbd, entry.billingState);
+    }
+    if (parts.cashCompr || parts.cashNcbd || cashAltQty > 0) {
+      addToBucket(cash, parts.cashCompr, parts.cashNcbd, entry.billingState);
     }
   }
   const billedTotal = head.billedCompr + cash.billedCompr;
@@ -203,5 +289,15 @@ export function summarizeContractEntries(
       head.unbilledCompr + cash.unbilledCompr + head.draftCompr + cash.draftCompr,
     receivedTotal: received,
     dueThisHead,
+    cashAlternateBilledCompr: cash.allCompr,
+    cashAlternateBilledOnlyCompr: cash.billedCompr,
+    cashTakenFromLines: lineCashTaken,
+    cashTakenTotal: cashTakenOverrideCents != null ? roundCents(cashTakenOverrideCents) : lineCashTaken,
   };
+}
+
+/** Print label for BOQ comparative serial. */
+export function comparativeSerialLabel(listed: boolean, serial: number | null | undefined) {
+  if (listed && serial != null && Number.isFinite(serial)) return String(serial);
+  return "out of comparative";
 }

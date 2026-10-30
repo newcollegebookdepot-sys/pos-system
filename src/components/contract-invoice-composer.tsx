@@ -29,6 +29,9 @@ type Line = {
   comparativeSerial: number | null;
   comparativeListed: boolean;
   entryKind: CtEntryKind;
+  pickedQty: string;
+  cashAltQty: string;
+  lineCashTaken: string;
 };
 
 type Bootstrap = {
@@ -43,6 +46,7 @@ type Bootstrap = {
   status: string;
   demandNo: string;
   entryKind: CtEntryKind;
+  cashTakenCents?: number;
   lines: {
     boqItemId: number | null;
     itemName: string;
@@ -56,6 +60,9 @@ type Bootstrap = {
     comparativeSerial: number | null;
     comparativeListed: boolean;
     entryKind: CtEntryKind;
+    pickedQty?: number;
+    cashAltQty?: number;
+    lineCashTakenCents?: number;
   }[];
 };
 
@@ -64,6 +71,7 @@ function newKey() {
 }
 
 function emptyLine(kind: CtEntryKind, mode: CtSaleMode): Line {
+  const allCash = kind === "cash_alternate";
   return {
     key: newKey(),
     boqItemId: null,
@@ -78,6 +86,9 @@ function emptyLine(kind: CtEntryKind, mode: CtSaleMode): Line {
     comparativeSerial: null,
     comparativeListed: true,
     entryKind: kind,
+    pickedQty: allCash ? "0" : "1",
+    cashAltQty: allCash ? "1" : "0",
+    lineCashTaken: "",
   };
 }
 
@@ -112,27 +123,38 @@ export function ContractInvoiceComposer({
   const [demandNo, setDemandNo] = useState(bootstrap?.demandNo || "");
   const [notes, setNotes] = useState(bootstrap?.notes || "");
   const [entryKind, setEntryKind] = useState<CtEntryKind>(bootstrap?.entryKind || "normal");
+  const [cashTaken, setCashTaken] = useState(
+    bootstrap?.cashTakenCents ? moneyToInput(bootstrap.cashTakenCents) : "",
+  );
   const [saleMode, setSaleMode] = useState<CtSaleMode>("unit");
   const [pcsPerPacketDefault, setPcsPerPacketDefault] = useState("");
   const [boqQ, setBoqQ] = useState("");
   const [boqHits, setBoqHits] = useState<BoqHit[]>([]);
   const [lines, setLines] = useState<Line[]>(() => {
     if (bootstrap?.lines.length) {
-      return bootstrap.lines.map((l) => ({
-        key: newKey(),
-        boqItemId: l.boqItemId,
-        itemName: l.itemName,
-        unit: l.unit,
-        saleMode: l.saleMode,
-        qty: String(l.qty || 1),
-        packetComparative: moneyToInput(l.packetComparativeCents),
-        packetNcbd: moneyToInput(l.packetNcbdCents),
-        pcsPerPacket: l.pcsPerPacket != null ? String(l.pcsPerPacket) : "",
-        pcsSold: l.pcsSold != null ? String(l.pcsSold) : "",
-        comparativeSerial: l.comparativeSerial,
-        comparativeListed: l.comparativeListed,
-        entryKind: l.entryKind,
-      }));
+      return bootstrap.lines.map((l) => {
+        const qty = l.qty || 1;
+        const picked = l.pickedQty != null ? l.pickedQty : l.entryKind === "cash_alternate" ? 0 : qty;
+        const cashAlt = l.cashAltQty != null ? l.cashAltQty : l.entryKind === "cash_alternate" ? qty : 0;
+        return {
+          key: newKey(),
+          boqItemId: l.boqItemId,
+          itemName: l.itemName,
+          unit: l.unit,
+          saleMode: l.saleMode,
+          qty: String(qty),
+          packetComparative: moneyToInput(l.packetComparativeCents),
+          packetNcbd: moneyToInput(l.packetNcbdCents),
+          pcsPerPacket: l.pcsPerPacket != null ? String(l.pcsPerPacket) : "",
+          pcsSold: l.pcsSold != null ? String(l.pcsSold) : "",
+          comparativeSerial: l.comparativeSerial,
+          comparativeListed: l.comparativeListed,
+          entryKind: l.entryKind,
+          pickedQty: String(picked),
+          cashAltQty: String(cashAlt),
+          lineCashTaken: l.lineCashTakenCents ? moneyToInput(l.lineCashTakenCents) : "",
+        };
+      });
     }
     return [];
   });
@@ -224,14 +246,78 @@ export function ContractInvoiceComposer({
   const totals = useMemo(() => {
     let compr = 0;
     let ncbd = 0;
+    let cashAltCompr = 0;
+    let cashTakenLines = 0;
     for (const row of priced) {
       if (row.ok) {
         compr += row.priced.comparativeTotalCents;
         ncbd += row.priced.ncbdTotalCents;
+        const bill = row.priced.qty;
+        const cashAlt = Number(row.line.cashAltQty) || 0;
+        const picked = Number(row.line.pickedQty) || 0;
+        const denom = picked + cashAlt || bill;
+        if (cashAlt > 0 && denom > 0) {
+          cashAltCompr += Math.round((row.priced.comparativeTotalCents * cashAlt) / denom);
+        }
+        cashTakenLines += tryParseMoney(row.line.lineCashTaken) ?? 0;
       }
     }
-    return { compr, ncbd, margin: compr - ncbd };
+    return { compr, ncbd, margin: compr - ncbd, cashAltCompr, cashTakenLines };
   }, [priced]);
+
+  function changeEntryKind(kind: CtEntryKind) {
+    setEntryKind(kind);
+    setLines((cur) =>
+      cur.map((l) => {
+        const qty = Number(l.saleMode === "pieces" ? l.pcsSold || l.qty : l.qty) || 0;
+        if (kind === "cash_alternate") {
+          return { ...l, entryKind: kind, pickedQty: "0", cashAltQty: String(qty || l.cashAltQty || "0") };
+        }
+        return { ...l, entryKind: kind, pickedQty: String(qty || l.pickedQty || "0"), cashAltQty: "0", lineCashTaken: "" };
+      }),
+    );
+    if (kind !== "cash_alternate") setCashTaken("");
+  }
+
+  function patchLine(key: string, patch: Partial<Line>) {
+    setLines((cur) => cur.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  }
+
+  function setBillQty(key: string, billQty: string) {
+    setLines((cur) =>
+      cur.map((l) => {
+        if (l.key !== key) return l;
+        const q = Number(billQty) || 0;
+        const cash = Number(l.cashAltQty) || 0;
+        const picked = Math.max(0, q - cash);
+        return {
+          ...l,
+          qty: billQty,
+          pcsSold: l.saleMode === "pieces" ? billQty : l.pcsSold,
+          pickedQty: String(picked),
+          cashAltQty: String(Math.min(cash, q)),
+        };
+      }),
+    );
+  }
+
+  function setCashAlt(key: string, cashAlt: string) {
+    setLines((cur) =>
+      cur.map((l) => {
+        if (l.key !== key) return l;
+        const bill = Number(l.saleMode === "pieces" ? l.pcsSold || l.qty : l.qty) || 0;
+        const cash = Math.max(0, Number(cashAlt) || 0);
+        const picked = Math.max(0, bill - cash);
+        return {
+          ...l,
+          cashAltQty: String(cash),
+          pickedQty: String(picked),
+          entryKind: cash > 0 && picked <= 0 ? "cash_alternate" : "normal",
+          lineCashTaken: cash > 0 ? l.lineCashTaken : "",
+        };
+      }),
+    );
+  }
 
   function selectContract(id: number) {
     setContractId(id);
@@ -258,6 +344,9 @@ export function ContractInvoiceComposer({
         pcsPerPacket: saleMode === "pieces" ? pcsPerPacketDefault : "",
         qty: saleMode === "unit" ? "1" : "",
         pcsSold: saleMode === "pieces" ? "1" : "",
+        pickedQty: entryKind === "cash_alternate" ? "0" : "1",
+        cashAltQty: entryKind === "cash_alternate" ? "1" : "0",
+        lineCashTaken: "",
       },
     ]);
     setBoqQ("");
@@ -271,6 +360,8 @@ export function ContractInvoiceComposer({
       return;
     }
     start(async () => {
+      const lineCashSum = lines.reduce((s, l) => s + (tryParseMoney(l.lineCashTaken) ?? 0), 0);
+      const invoiceCash = tryParseMoney(cashTaken) ?? 0;
       const res = await saveComposerInvoice({
         invoiceId: bootstrap?.invoiceId,
         contractId,
@@ -279,6 +370,7 @@ export function ContractInvoiceComposer({
         notes,
         demandNo,
         entryKind,
+        cashTakenCents: Math.max(invoiceCash, lineCashSum),
         lines: lines.map((l) => ({
           boqItemId: l.boqItemId,
           itemName: l.itemName,
@@ -292,6 +384,9 @@ export function ContractInvoiceComposer({
           comparativeListed: l.comparativeListed,
           comparativeSerial: l.comparativeSerial,
           entryKind: l.entryKind,
+          pickedQty: l.pickedQty === "" ? null : Number(l.pickedQty),
+          cashAltQty: l.cashAltQty === "" ? null : Number(l.cashAltQty),
+          lineCashTakenCents: tryParseMoney(l.lineCashTaken) ?? 0,
           demandNo,
         })),
       });
@@ -400,12 +495,27 @@ export function ContractInvoiceComposer({
             <select
               className="field"
               value={entryKind}
-              onChange={(e) => setEntryKind(e.target.value as CtEntryKind)}
+              onChange={(e) => changeEntryKind(e.target.value as CtEntryKind)}
             >
               <option value="normal">Normal (counts to head)</option>
               <option value="cash_alternate">Cash alternate</option>
             </select>
           </div>
+          <p className="muted" style={{ flexBasis: "100%", marginTop: 4 }}>
+            On each line set <strong>Bill qty</strong>, then <strong>Cash alt</strong> (rest is picked). Enter{" "}
+            <strong>Cash taken</strong> for the cash portion (e.g. bill 10, pick 5, cash alt 5 + Rs 10,000).
+          </p>
+          {entryKind === "cash_alternate" ? (
+            <div>
+              <label className="label">Invoice cash taken (optional override)</label>
+              <input
+                className="field"
+                value={cashTaken}
+                onChange={(e) => setCashTaken(e.target.value)}
+                placeholder="sum of line cash, or more"
+              />
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -447,10 +557,11 @@ export function ContractInvoiceComposer({
             <thead>
               <tr>
                 <th>Item</th>
-                <th>Mode</th>
-                <th className="right">Qty</th>
+                <th className="right">Bill qty</th>
+                <th className="right">Picked</th>
+                <th className="right">Cash alt</th>
+                <th className="right">Cash taken</th>
                 <th className="right">Compr</th>
-                <th className="right">NCBD</th>
                 <th className="right">Total</th>
                 <th />
               </tr>
@@ -462,75 +573,52 @@ export function ContractInvoiceComposer({
                     <input
                       className="field"
                       value={row.line.itemName}
-                      onChange={(e) =>
-                        setLines((cur) =>
-                          cur.map((l) => (l.key === row.line.key ? { ...l, itemName: e.target.value } : l)),
-                        )
-                      }
+                      onChange={(e) => patchLine(row.line.key, { itemName: e.target.value })}
                     />
-                    {row.line.comparativeSerial != null ? (
-                      <span className="muted">#{row.line.comparativeSerial}</span>
-                    ) : null}
-                  </td>
-                  <td className="muted">{row.line.saleMode}</td>
-                  <td className="right">
+                    <span className="muted">
+                      {row.line.comparativeSerial != null ? `#${row.line.comparativeSerial}` : "out of comparative"}
+                      {row.line.saleMode === "pieces" ? " · pieces" : ""}
+                    </span>
                     {row.line.saleMode === "pieces" ? (
-                      <div className="grid gap-1">
-                        <input
-                          className="field"
-                          placeholder="pcs/pkt"
-                          value={row.line.pcsPerPacket}
-                          onChange={(e) =>
-                            setLines((cur) =>
-                              cur.map((l) => (l.key === row.line.key ? { ...l, pcsPerPacket: e.target.value } : l)),
-                            )
-                          }
-                        />
-                        <input
-                          className="field"
-                          placeholder="pcs sold"
-                          value={row.line.pcsSold}
-                          onChange={(e) =>
-                            setLines((cur) =>
-                              cur.map((l) => (l.key === row.line.key ? { ...l, pcsSold: e.target.value } : l)),
-                            )
-                          }
-                        />
-                      </div>
-                    ) : (
                       <input
                         className="field"
-                        value={row.line.qty}
-                        onChange={(e) =>
-                          setLines((cur) =>
-                            cur.map((l) => (l.key === row.line.key ? { ...l, qty: e.target.value } : l)),
-                          )
-                        }
+                        placeholder="pcs in packet"
+                        value={row.line.pcsPerPacket}
+                        onChange={(e) => patchLine(row.line.key, { pcsPerPacket: e.target.value })}
+                        style={{ marginTop: 4 }}
                       />
-                    )}
+                    ) : null}
+                  </td>
+                  <td className="right">
+                    <input
+                      className="field"
+                      value={row.line.saleMode === "pieces" ? row.line.pcsSold : row.line.qty}
+                      onChange={(e) => setBillQty(row.line.key, e.target.value)}
+                    />
+                  </td>
+                  <td className="right mono">{row.line.pickedQty || "0"}</td>
+                  <td className="right">
+                    <input
+                      className="field"
+                      value={row.line.cashAltQty}
+                      onChange={(e) => setCashAlt(row.line.key, e.target.value)}
+                      placeholder="0"
+                    />
+                  </td>
+                  <td className="right">
+                    <input
+                      className="field"
+                      value={row.line.lineCashTaken}
+                      onChange={(e) => patchLine(row.line.key, { lineCashTaken: e.target.value })}
+                      placeholder="0"
+                      disabled={!(Number(row.line.cashAltQty) > 0)}
+                    />
                   </td>
                   <td className="right">
                     <input
                       className="field"
                       value={row.line.packetComparative}
-                      onChange={(e) =>
-                        setLines((cur) =>
-                          cur.map((l) =>
-                            l.key === row.line.key ? { ...l, packetComparative: e.target.value } : l,
-                          ),
-                        )
-                      }
-                    />
-                  </td>
-                  <td className="right">
-                    <input
-                      className="field"
-                      value={row.line.packetNcbd}
-                      onChange={(e) =>
-                        setLines((cur) =>
-                          cur.map((l) => (l.key === row.line.key ? { ...l, packetNcbd: e.target.value } : l)),
-                        )
-                      }
+                      onChange={(e) => patchLine(row.line.key, { packetComparative: e.target.value })}
                     />
                   </td>
                   <td className="right mono">
@@ -558,7 +646,15 @@ export function ContractInvoiceComposer({
           </div>
           <div className="text-right">
             <p className="card-value">{formatMoney(totals.compr)}</p>
-            <p className="card-sub">Comparative · NCBD {formatMoney(totals.ncbd)} · margin {formatMoney(totals.margin)}</p>
+            <p className="card-sub">
+              Comparative · NCBD {formatMoney(totals.ncbd)} · margin {formatMoney(totals.margin)}
+            </p>
+            {totals.cashAltCompr > 0 || totals.cashTakenLines > 0 ? (
+              <p className="card-sub" style={{ marginTop: 6 }}>
+                Cash taken {formatMoney(Math.max(tryParseMoney(cashTaken) ?? 0, totals.cashTakenLines))} ·
+                alternate billed {formatMoney(totals.cashAltCompr)}
+              </p>
+            ) : null}
           </div>
         </div>
         {error ? (

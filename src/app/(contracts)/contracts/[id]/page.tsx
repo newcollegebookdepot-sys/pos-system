@@ -65,6 +65,16 @@ export default async function ContractBoardPage({ params }: { params: Promise<{ 
           <p className="card-title">Received</p>
           <p className="card-value mono">{formatMoney(summary.receivedTotal)}</p>
         </article>
+        <article className="card">
+          <p className="card-title">Cash taken</p>
+          <p className="card-value mono">{formatMoney(summary.cashTakenTotal)}</p>
+          <p className="card-sub">Actual cash against alternate bills</p>
+        </article>
+        <article className="card">
+          <p className="card-title">Alternate cash billed</p>
+          <p className="card-value mono">{formatMoney(summary.cashAlternateBilledCompr)}</p>
+          <p className="card-sub">Comparative stand-in total</p>
+        </article>
       </div>
 
       <section className="box">

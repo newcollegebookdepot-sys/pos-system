@@ -2,7 +2,10 @@ import "server-only";
 
 import {
   calcContractLine,
+  milliToQty,
   nextInvoiceNumber,
+  qtyToMilli,
+  resolveLineSplit,
   type CtEntryKind,
   type CtInvoiceStatus,
   type CtSaleMode,
@@ -10,7 +13,6 @@ import {
 import { allRows, getDb, getRow, run, withTransaction } from "@/lib/db";
 import { ActionError } from "@/lib/errors";
 import { nowIso } from "@/lib/format";
-import { milliToQty } from "@/lib/domain/contracts";
 import { roundCents } from "@/lib/money";
 import { getContract } from "@/lib/repo/contracts/contracts";
 
@@ -36,6 +38,9 @@ export type CtSupplyEntry = {
   pcsPerPacket: number | null;
   pcsSold: number | null;
   entryKind: CtEntryKind;
+  pickedQty: number;
+  cashAltQty: number;
+  lineCashTakenCents: number;
   notes: string | null;
 };
 
@@ -47,11 +52,13 @@ export type CtInvoice = {
   status: CtInvoiceStatus;
   notes: string | null;
   billedAt: string | null;
+  cashTakenCents: number;
   officeName?: string;
   contractHead?: string;
   firmName?: string;
   comparativeTotalCents: number;
   ncbdTotalCents: number;
+  cashAlternateComparativeCents: number;
   demandNo: string | null;
   hasCashAlternate: boolean;
   isCashAlternateOnly: boolean;
@@ -66,6 +73,7 @@ type InvRow = {
   status: CtInvoiceStatus;
   notes: string | null;
   billed_at: string | null;
+  cash_taken_cents?: number | null;
   office_name?: string;
   contract_head?: string;
   firm_name?: string;
@@ -93,10 +101,20 @@ type EntRow = {
   pcs_per_packet_milli: number | null;
   pcs_sold_milli: number | null;
   entry_kind: CtEntryKind;
+  picked_qty_milli?: number | null;
+  cash_alt_qty_milli?: number | null;
+  line_cash_taken_cents?: number | null;
   notes: string | null;
 };
 
 function mapEntry(row: EntRow): CtSupplyEntry {
+  const qty = milliToQty(row.qty_milli);
+  const split = resolveLineSplit({
+    qty,
+    pickedQty: row.picked_qty_milli == null ? null : milliToQty(row.picked_qty_milli),
+    cashAltQty: row.cash_alt_qty_milli == null ? null : milliToQty(row.cash_alt_qty_milli),
+    entryKind: row.entry_kind,
+  });
   return {
     id: Number(row.id),
     contractId: Number(row.contract_id),
@@ -105,7 +123,7 @@ function mapEntry(row: EntRow): CtSupplyEntry {
     entryDate: row.entry_date,
     itemName: row.item_name,
     unit: row.unit,
-    qty: milliToQty(row.qty_milli),
+    qty,
     comparativeCents: Number(row.comparative_cents),
     comparativeTotalCents: Number(row.comparative_total_cents),
     comparativeSerial: row.comparative_serial,
@@ -118,7 +136,10 @@ function mapEntry(row: EntRow): CtSupplyEntry {
     packetNcbdCents: row.packet_ncbd_cents,
     pcsPerPacket: row.pcs_per_packet_milli == null ? null : milliToQty(row.pcs_per_packet_milli),
     pcsSold: row.pcs_sold_milli == null ? null : milliToQty(row.pcs_sold_milli),
-    entryKind: row.entry_kind,
+    entryKind: row.entry_kind === "cash_alternate" ? "cash_alternate" : "normal",
+    pickedQty: split.pickedQty,
+    cashAltQty: split.cashAltQty,
+    lineCashTakenCents: Number(row.line_cash_taken_cents || 0),
     notes: row.notes,
   };
 }
@@ -126,9 +147,16 @@ function mapEntry(row: EntRow): CtSupplyEntry {
 function withTotals(inv: InvRow, entries: CtSupplyEntry[]): CtInvoice {
   const comparativeTotalCents = entries.reduce((s, e) => s + e.comparativeTotalCents, 0);
   const ncbdTotalCents = entries.reduce((s, e) => s + e.ncbdTotalCents, 0);
+  const cashAlternateComparativeCents = entries.reduce((s, e) => {
+    const totalQ = e.pickedQty + e.cashAltQty;
+    if (totalQ <= 0) return s;
+    return s + roundCents(e.comparativeTotalCents * (e.cashAltQty / totalQ));
+  }, 0);
   const demandNo = entries.find((e) => e.demandNo)?.demandNo || null;
-  const hasCashAlternate = entries.some((e) => e.entryKind === "cash_alternate");
-  const isCashAlternateOnly = entries.length > 0 && entries.every((e) => e.entryKind === "cash_alternate");
+  const hasCashAlternate = entries.some((e) => e.cashAltQty > 0 || e.entryKind === "cash_alternate" || e.lineCashTakenCents > 0);
+  const isCashAlternateOnly = entries.length > 0 && entries.every((e) => e.pickedQty <= 0 && e.cashAltQty > 0);
+  const lineCashSum = entries.reduce((s, e) => s + e.lineCashTakenCents, 0);
+  const cashTakenCents = Math.max(Number(inv.cash_taken_cents || 0), lineCashSum);
   return {
     id: Number(inv.id),
     contractId: Number(inv.contract_id),
@@ -137,11 +165,13 @@ function withTotals(inv: InvRow, entries: CtSupplyEntry[]): CtInvoice {
     status: inv.status,
     notes: inv.notes,
     billedAt: inv.billed_at,
+    cashTakenCents,
     officeName: inv.office_name,
     contractHead: inv.contract_head,
     firmName: inv.firm_name,
     comparativeTotalCents,
     ncbdTotalCents,
+    cashAlternateComparativeCents,
     demandNo,
     hasCashAlternate,
     isCashAlternateOnly,
@@ -159,13 +189,46 @@ export async function suggestInvoiceNumber(contractId: number) {
   return nextInvoiceNumber(nums);
 }
 
-export async function listCtInvoices(opts: { contractId?: number; status?: string } = {}) {
+export async function listOfficesForInvoices(q = "") {
+  const db = await getDb();
+  const rows = await allRows<{
+    office_name: string;
+    invoices: number;
+    drafts: number;
+    billed: number;
+  }>(
+    db,
+    `SELECT c.office_name,
+            COUNT(i.id) AS invoices,
+            SUM(CASE WHEN i.status = 'draft' THEN 1 ELSE 0 END) AS drafts,
+            SUM(CASE WHEN i.status = 'billed' THEN 1 ELSE 0 END) AS billed
+     FROM ct_contracts c
+     LEFT JOIN ct_invoices i ON i.contract_id = c.id
+     GROUP BY c.office_name
+     ORDER BY c.office_name COLLATE NOCASE`,
+  );
+  const needle = q.trim().toLowerCase();
+  return rows
+    .map((r) => ({
+      officeName: r.office_name,
+      invoiceCount: Number(r.invoices || 0),
+      draftCount: Number(r.drafts || 0),
+      billedCount: Number(r.billed || 0),
+    }))
+    .filter((r) => !needle || r.officeName.toLowerCase().includes(needle));
+}
+
+export async function listCtInvoices(opts: { contractId?: number; status?: string; officeName?: string } = {}) {
   const db = await getDb();
   const where: string[] = ["1=1"];
   const params: (string | number)[] = [];
   if (opts.contractId) {
     where.push("i.contract_id = ?");
     params.push(opts.contractId);
+  }
+  if (opts.officeName?.trim()) {
+    where.push("lower(c.office_name) = lower(?)");
+    params.push(opts.officeName.trim());
   }
   if (opts.status) {
     where.push("i.status = ?");
@@ -227,6 +290,9 @@ export type ComposerLinePayload = {
   comparativeListed?: boolean;
   comparativeSerial?: number | null;
   entryKind?: CtEntryKind;
+  pickedQty?: number | null;
+  cashAltQty?: number | null;
+  lineCashTakenCents?: number;
   demandNo?: string;
   notes?: string;
 };
@@ -238,6 +304,8 @@ export type ComposerPayload = {
   notes?: string;
   demandNo?: string;
   entryKind?: CtEntryKind;
+  /** Actual cash taken that this alternate bill stands in for (cents). */
+  cashTakenCents?: number;
   lines: ComposerLinePayload[];
 };
 
@@ -255,6 +323,7 @@ async function replaceLines(
 
   await run(db, "DELETE FROM ct_supply_entries WHERE invoice_id = ?", [invoiceId]);
 
+  let lineCashTotal = 0;
   for (const raw of payload.lines) {
     const itemName = raw.itemName.trim();
     if (!itemName) throw new ActionError("Each line needs an item name.");
@@ -291,8 +360,16 @@ async function replaceLines(
       serial = listed ? Number(boq.serial_number) : null;
     }
 
-    const kind: CtEntryKind =
+    const kindHint: CtEntryKind =
       raw.entryKind === "cash_alternate" || raw.entryKind === "normal" ? raw.entryKind : entryKind;
+    const split = resolveLineSplit({
+      qty: priced.qty,
+      pickedQty: raw.pickedQty,
+      cashAltQty: raw.cashAltQty,
+      entryKind: kindHint,
+    });
+    const lineCash = Math.max(0, roundCents(raw.lineCashTakenCents || 0));
+    if (split.cashAltQty > 0) lineCashTotal += lineCash;
 
     await run(
       db,
@@ -300,8 +377,9 @@ async function replaceLines(
         contract_id, invoice_id, boq_item_id, entry_date, item_name, unit, qty_milli,
         comparative_cents, comparative_total_cents, comparative_serial, comparative_listed, demand_no,
         ncbd_cents, ncbd_total_cents, sale_mode, packet_comparative_cents, packet_ncbd_cents,
-        pcs_per_packet_milli, pcs_sold_milli, entry_kind, notes, created_at, updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        pcs_per_packet_milli, pcs_sold_milli, entry_kind, picked_qty_milli, cash_alt_qty_milli,
+        line_cash_taken_cents, notes, created_at, updated_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         contractId,
         invoiceId,
@@ -322,13 +400,20 @@ async function replaceLines(
         priced.packetNcbdCents,
         priced.pcsPerPacketMilli,
         priced.pcsSoldMilli,
-        kind,
+        split.entryKind,
+        qtyToMilli(split.pickedQty),
+        qtyToMilli(split.cashAltQty),
+        lineCash,
         raw.notes?.trim() || null,
         when,
         when,
       ],
     );
   }
+
+  // Keep invoice cash_taken in sync with line cash (unless payload sets a higher override)
+  const cashTaken = Math.max(0, roundCents(payload.cashTakenCents || 0), lineCashTotal);
+  await run(db, "UPDATE ct_invoices SET cash_taken_cents=? WHERE id=?", [cashTaken, invoiceId]);
 }
 
 export async function createCtInvoice(payload: ComposerPayload) {
@@ -342,13 +427,14 @@ export async function createCtInvoice(payload: ComposerPayload) {
     number,
   ]);
   if (clash) throw new ActionError("Invoice number already used.");
+  const cashTaken = Math.max(0, roundCents(payload.cashTakenCents || 0));
 
   return await withTransaction(db, async () => {
     const inserted = await run(
       db,
-      `INSERT INTO ct_invoices (contract_id, invoice_number, iso_date, status, notes, billed_at, created_at, updated_at)
-       VALUES (?,?,?,'draft',?,NULL,?,?)`,
-      [payload.contractId, number, payload.isoDate.slice(0, 10), payload.notes?.trim() || null, when, when],
+      `INSERT INTO ct_invoices (contract_id, invoice_number, iso_date, status, notes, billed_at, cash_taken_cents, created_at, updated_at)
+       VALUES (?,?,?,'draft',?,NULL,?,?,?)`,
+      [payload.contractId, number, payload.isoDate.slice(0, 10), payload.notes?.trim() || null, cashTaken, when, when],
     );
     await replaceLines(db, inserted.id, payload.contractId, { ...payload, invoiceNumber: number });
     return inserted.id;
@@ -369,11 +455,12 @@ export async function updateCtInvoice(invoiceId: number, payload: ComposerPayloa
     );
     if (clash) throw new ActionError("Invoice number already used.");
   }
+  const cashTaken = Math.max(0, roundCents(payload.cashTakenCents || 0));
   await withTransaction(db, async () => {
     await run(
       db,
-      `UPDATE ct_invoices SET invoice_number=?, iso_date=?, notes=?, updated_at=? WHERE id=?`,
-      [number, payload.isoDate.slice(0, 10), payload.notes?.trim() || null, when, invoiceId],
+      `UPDATE ct_invoices SET invoice_number=?, iso_date=?, notes=?, cash_taken_cents=?, updated_at=? WHERE id=?`,
+      [number, payload.isoDate.slice(0, 10), payload.notes?.trim() || null, cashTaken, when, invoiceId],
     );
     await replaceLines(db, invoiceId, existing.contractId, { ...payload, invoiceNumber: number });
   });
@@ -441,6 +528,9 @@ export function entryToComposerLine(e: CtSupplyEntry) {
     comparativeTotalCents: e.comparativeTotalCents,
     ncbdTotalCents: e.ncbdTotalCents,
     entryKind: e.entryKind,
+    pickedQty: e.pickedQty,
+    cashAltQty: e.cashAltQty,
+    lineCashTakenCents: e.lineCashTakenCents,
     demandNo: e.demandNo || "",
   };
 }

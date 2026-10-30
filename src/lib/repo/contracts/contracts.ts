@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  milliToQty,
   summarizeContractEntries,
   type CtContractStatus,
   type EntryForSummary,
@@ -177,9 +178,14 @@ export async function contractSummary(contractId: number) {
     ncbd_total_cents: number;
     invoice_id: number | null;
     invoice_status: string | null;
+    picked_qty_milli: number | null;
+    cash_alt_qty_milli: number | null;
+    line_cash_taken_cents: number | null;
+    qty_milli: number;
   }>(
     db,
-    `SELECT e.entry_kind, e.comparative_total_cents, e.ncbd_total_cents, e.invoice_id, i.status AS invoice_status
+    `SELECT e.entry_kind, e.comparative_total_cents, e.ncbd_total_cents, e.invoice_id, i.status AS invoice_status,
+            e.picked_qty_milli, e.cash_alt_qty_milli, e.line_cash_taken_cents, e.qty_milli
      FROM ct_supply_entries e
      LEFT JOIN ct_invoices i ON i.id = e.invoice_id
      WHERE e.contract_id = ?`,
@@ -189,11 +195,17 @@ export async function contractSummary(contractId: number) {
     if (e.invoice_id == null) billingState = "unbilled";
     else if (e.invoice_status === "billed") billingState = "billed";
     else billingState = "on_draft";
+    const qty = milliToQty(e.qty_milli);
+    const pickedQty = e.picked_qty_milli == null ? null : milliToQty(e.picked_qty_milli);
+    const cashAltQty = e.cash_alt_qty_milli == null ? null : milliToQty(e.cash_alt_qty_milli);
     return {
       entryKind: e.entry_kind === "cash_alternate" ? "cash_alternate" : "normal",
       comparativeTotalCents: Number(e.comparative_total_cents),
       ncbdTotalCents: Number(e.ncbd_total_cents),
       billingState,
+      pickedQty: pickedQty ?? (e.entry_kind === "cash_alternate" ? 0 : qty),
+      cashAltQty: cashAltQty ?? (e.entry_kind === "cash_alternate" ? qty : 0),
+      lineCashTakenCents: Number(e.line_cash_taken_cents || 0),
     };
   });
   const received = await getRow<{ s: number }>(
@@ -201,7 +213,13 @@ export async function contractSummary(contractId: number) {
     "SELECT COALESCE(SUM(amount_cents),0) AS s FROM ct_payments WHERE contract_id = ?",
     [contractId],
   );
-  return summarizeContractEntries(entries, Number(received?.s || 0));
+  const cashTaken = await getRow<{ s: number }>(
+    db,
+    "SELECT COALESCE(SUM(cash_taken_cents),0) AS s FROM ct_invoices WHERE contract_id = ?",
+    [contractId],
+  );
+  const summarized = summarizeContractEntries(entries, Number(received?.s || 0), Number(cashTaken?.s || 0));
+  return summarized;
 }
 
 export async function officeSummary(officeName: string) {

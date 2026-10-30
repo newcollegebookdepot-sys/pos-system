@@ -68,6 +68,32 @@ async function migrateLocal(db: DatabaseSync) {
   );
   addCol("operator_name", "operator_name TEXT NOT NULL DEFAULT ''");
 
+  const ctInvCols = db.prepare("PRAGMA table_info(ct_invoices)").all() as { name: string }[];
+  if (!ctInvCols.some((c) => c.name === "cash_taken_cents")) {
+    db.exec("ALTER TABLE ct_invoices ADD COLUMN cash_taken_cents INTEGER NOT NULL DEFAULT 0");
+  }
+
+  const ctEntCols = db.prepare("PRAGMA table_info(ct_supply_entries)").all() as { name: string }[];
+  const entNames = new Set(ctEntCols.map((c) => c.name));
+  if (!entNames.has("picked_qty_milli")) {
+    db.exec("ALTER TABLE ct_supply_entries ADD COLUMN picked_qty_milli INTEGER");
+  }
+  if (!entNames.has("cash_alt_qty_milli")) {
+    db.exec("ALTER TABLE ct_supply_entries ADD COLUMN cash_alt_qty_milli INTEGER");
+  }
+  if (!entNames.has("line_cash_taken_cents")) {
+    db.exec("ALTER TABLE ct_supply_entries ADD COLUMN line_cash_taken_cents INTEGER NOT NULL DEFAULT 0");
+  }
+  // Expand entry_kind check for mixed (SQLite ignores CHECK on ALTER; new DBs get it from schema)
+  try {
+    db.exec(`UPDATE ct_supply_entries SET picked_qty_milli = qty_milli WHERE picked_qty_milli IS NULL AND entry_kind = 'normal'`);
+    db.exec(
+      `UPDATE ct_supply_entries SET cash_alt_qty_milli = qty_milli, picked_qty_milli = 0 WHERE cash_alt_qty_milli IS NULL AND entry_kind = 'cash_alternate'`,
+    );
+  } catch {
+    // ignore
+  }
+
   const walkIn = db.prepare("SELECT id FROM customers WHERE id = 1").get() as { id: number } | undefined;
   if (!walkIn) {
     const when = new Date().toISOString();
@@ -111,6 +137,35 @@ async function migrateTurso(client: Client) {
     "print_terms TEXT NOT NULL DEFAULT 'Goods once sold are not returnable unless defective.'",
   );
   await addCol("operator_name", "operator_name TEXT NOT NULL DEFAULT ''");
+
+  const ctInvCols = await client.execute("PRAGMA table_info(ct_invoices)");
+  if (!ctInvCols.rows.some((r) => String(r.name) === "cash_taken_cents")) {
+    await client.execute("ALTER TABLE ct_invoices ADD COLUMN cash_taken_cents INTEGER NOT NULL DEFAULT 0");
+  }
+
+  const ctEntCols = await client.execute("PRAGMA table_info(ct_supply_entries)");
+  const entNames = new Set(ctEntCols.rows.map((r) => String(r.name)));
+  if (!entNames.has("picked_qty_milli")) {
+    await client.execute("ALTER TABLE ct_supply_entries ADD COLUMN picked_qty_milli INTEGER");
+  }
+  if (!entNames.has("cash_alt_qty_milli")) {
+    await client.execute("ALTER TABLE ct_supply_entries ADD COLUMN cash_alt_qty_milli INTEGER");
+  }
+  if (!entNames.has("line_cash_taken_cents")) {
+    await client.execute(
+      "ALTER TABLE ct_supply_entries ADD COLUMN line_cash_taken_cents INTEGER NOT NULL DEFAULT 0",
+    );
+  }
+  try {
+    await client.execute(
+      `UPDATE ct_supply_entries SET picked_qty_milli = qty_milli WHERE picked_qty_milli IS NULL AND entry_kind = 'normal'`,
+    );
+    await client.execute(
+      `UPDATE ct_supply_entries SET cash_alt_qty_milli = qty_milli, picked_qty_milli = 0 WHERE cash_alt_qty_milli IS NULL AND entry_kind = 'cash_alternate'`,
+    );
+  } catch {
+    // ignore
+  }
 
   const walkIn = await client.execute("SELECT id FROM customers WHERE id = 1");
   if (!walkIn.rows.length) {

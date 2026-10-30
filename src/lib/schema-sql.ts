@@ -328,6 +328,7 @@ export const SCHEMA_SQL = `
       status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','billed')),
       notes TEXT,
       billed_at TEXT,
+      cash_taken_cents INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       UNIQUE (contract_id, invoice_number)
@@ -355,6 +356,9 @@ export const SCHEMA_SQL = `
       pcs_per_packet_milli INTEGER,
       pcs_sold_milli INTEGER,
       entry_kind TEXT NOT NULL DEFAULT 'normal' CHECK (entry_kind IN ('normal','cash_alternate')),
+      picked_qty_milli INTEGER,
+      cash_alt_qty_milli INTEGER,
+      line_cash_taken_cents INTEGER NOT NULL DEFAULT 0,
       notes TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
